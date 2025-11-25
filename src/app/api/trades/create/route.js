@@ -1,20 +1,42 @@
 import { NextResponse } from "next/server";
 import prismaPromise from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
+import { getSpot } from "@/lib/price-service";
+import { createTradeSchema } from "@/lib/validation/trades";
+import { rateLimit } from "@/lib/rate-limit";
 
 // POST - Create new binary trade
 export async function POST(request) {
   const prisma = await prismaPromise;
   try {
+    const auth = await requireUser(request);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: 401 });
+    }
+    const { user } = auth.session;
     const body = await request.json();
-    const { userId, coin, type, amount, timeframe } = body;
+    const ip = request.headers.get("x-forwarded-for") || "local";
+    const rl = rateLimit(`trades:create:${ip}`, 30, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
+    }
+    const parsed = createTradeSchema.safeParse({
+      coin: body?.coin,
+      type: body?.type,
+      amount: Number(body?.amount),
+      timeframe: Number(body?.timeframe),
+    });
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, error: "Invalid payload" }, { status: 400 });
+    }
+    const { coin, type, amount, timeframe } = parsed.data;
 
     // Validate required fields
-    if (!userId || !coin || !type || !amount || !timeframe) {
+    if (!coin || !type || !amount || !timeframe) {
       return NextResponse.json(
         {
           success: false,
-          error:
-            "Missing required fields: userId, coin, type, amount, timeframe",
+          error: "Missing required fields: coin, type, amount, timeframe",
         },
         { status: 400 }
       );
@@ -46,19 +68,12 @@ export async function POST(request) {
       );
     }
 
-    // Check if user exists and has sufficient balance
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
+    // Check if user has sufficient balance
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+    if (!dbUser) {
+      return NextResponse.json({ success: false, error: "User not found" }, { status: 404 });
     }
-
-    if (user.balance < amount) {
+    if (dbUser.balance < amount) {
       return NextResponse.json(
         { success: false, error: "Insufficient balance for this trade" },
         { status: 400 }
@@ -80,32 +95,34 @@ export async function POST(request) {
       returnPct = 65; // 65% return for longer timeframes
     }
 
-    // Deduct amount from user balance
-    await prisma.user.update({
-      where: { id: userId },
-      data: { balance: user.balance - amount },
-    });
+    // Snapshot open price
+    const spot = await getSpot(coin);
 
-    // Create new binary trade
-    const newTrade = await prisma.trade.create({
-      data: {
-        userId,
-        coin: coin.toUpperCase(),
-        type,
-        amount: parseFloat(amount),
-        timeframe: parseInt(timeframe),
-        returnPct,
-        status: "PENDING",
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            balance: true,
+    // Create trade and debit in a single transaction
+    const newTrade = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { balance: dbUser.balance - parseFloat(amount) },
+      });
+      return tx.trade.create({
+        data: {
+          userId: user.id,
+          coin: coin.toUpperCase(),
+          type,
+          direction: type,
+          amount: parseFloat(amount),
+          timeframe: parseInt(timeframe),
+          returnPct,
+          priceOpen: spot.usd,
+          priceOpenAt: new Date(),
+          status: "PENDING",
+        },
+        include: {
+          user: {
+            select: { id: true, balance: true, ethereumAddress: true },
           },
         },
-      },
+      });
     });
 
     return NextResponse.json(
@@ -114,6 +131,7 @@ export async function POST(request) {
         trade: newTrade,
         message: "Binary trade created successfully",
         potentialReturn: amount * (returnPct / 100),
+        priceOpen: spot.usd,
       },
       { status: 201 }
     );

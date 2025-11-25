@@ -24,7 +24,7 @@ export async function GET(request) {
           select: {
             id: true,
             email: true,
-            name: true
+            balance: true
           }
         }
       }
@@ -105,7 +105,6 @@ export async function POST(request) {
         coin: coin.toUpperCase(),
         type,
         amount: parseFloat(amount),
-        price: parseFloat(price),
         status
       },
       include: {
@@ -113,7 +112,7 @@ export async function POST(request) {
           select: {
             id: true,
             email: true,
-            name: true
+            balance: true
           }
         }
       }

@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import prismaPromise from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth";
 
 // GET - Fetch all withdraw requests for admin
-export async function GET() {
+export async function GET(request) {
   const prisma = await prismaPromise;
   try {
+    const auth = await requireAdmin(request);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: 403 });
+    }
     const withdrawRequests = await prisma.withdrawRequest.findMany({
       include: {
         user: {

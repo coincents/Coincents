@@ -7,20 +7,96 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
 model User {
   id               String            @id @default(cuid())
-  email            String            @unique
-  password         String
-  balance          Float             @default(0.0)
+  email            String?           @unique
+  emailVerified    Boolean           @default(false)
+  name             String?
+  password         String?
+  username         String?           @unique
+  displayUsername  String?           @unique
+  image            String?
+  ethereumAddress  String?           @unique
+  btcAddress       String?
+  balance          Float             @default(1000.0)
+  role             Role              @default(USER)
+  banned           Boolean?          @default(false)
+  banReason        String?
+  banExpires       DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
-  btcAddress       String?
-  ethereumAddress  String?           @unique
   trades           Trade[]
-  transactions     Transaction[]
   withdrawRequests WithdrawRequest[]
+  transactions     Transaction[]
+  auditLogs        AuditLog[]        @relation("UserAuditLogs")
+  deposits         Deposit[]
+  sessions         Session[]
+  accounts         Account[]
+  wallets          WalletAddress[]
 
   @@map("users")
+}
+
+model Session {
+  id             String    @id @default(cuid())
+  userId         String
+  expiresAt      DateTime
+  token          String    @unique
+  ipAddress      String?
+  userAgent      String?
+  impersonatedBy String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id           String   @id @default(cuid())
+  userId       String
+  accountId    String
+  providerId   String
+  accessToken  String?
+  refreshToken String?
+  idToken      String?
+  expiresAt    DateTime?
+  password     String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verifications")
+}
+
+model WalletAddress {
+  id        String   @id @default(cuid())
+  userId    String
+  address   String
+  chainId   Int
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, address, chainId])
+  @@map("wallet_addresses")
 }
 
 model Trade {
@@ -31,6 +107,12 @@ model Trade {
   amount     Float
   timeframe  Int
   returnPct  Float
+  direction  String
+  priceOpen  Float
+  priceOpenAt DateTime
+  priceClose Float?
+  priceCloseAt DateTime?
+  pnl        Float?
   status     String    @default("PENDING")
   createdAt  DateTime  @default(now())
   resolvedAt DateTime?
@@ -45,6 +127,8 @@ model WithdrawRequest {
   amount     Float
   proofImage String
   txHash     String?
+  toAddress  String
+  adminNotes String?
   status     String    @default("PENDING")
   createdAt  DateTime  @default(now())
   resolvedAt DateTime?
@@ -66,4 +150,42 @@ model Transaction {
   user            User     @relation(fields: [userId], references: [id])
 
   @@map("transactions")
+}
+
+model Deposit {
+  id              String   @id @default(cuid())
+  userId          String
+  token           String
+  amount          Float
+  transactionHash String?
+  status          String   @default("PENDING")
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@map("deposits")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  action       String
+  entity       String
+  entityId     String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  actor        User?    @relation("UserAuditLogs", fields: [actorUserId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model DepositAddress {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  address   String
+  network   String?
+  isActive  Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("deposit_addresses")
 }

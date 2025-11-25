@@ -1,12 +1,13 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useUser } from "../../../contexts/UserContext";
 import TradeModal from "@/components/TradeModal";
 import styles from "./market.module.css";
 
 export default function MarketPage() {
+  const router = useRouter();
   const { userId, walletAddress } = useUser();
   const [cryptoData, setCryptoData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -255,10 +256,7 @@ export default function MarketPage() {
                       <div className={styles.cryptoActions}>
                         <button
                           className={styles.tradeButton}
-                          onClick={() => {
-                            setTradeCoin(coin);
-                            setShowTradeModal(true);
-                          }}
+                          onClick={() => router.push(`/trade?symbol=${coin.symbol}`)}
                         >
                           Trade {coin.symbol}
                         </button>
@@ -275,7 +273,7 @@ export default function MarketPage() {
                             }
                           }}
                         >
-                          {isInWishlist(coin.id) ? "❤" : "🤍"}
+                          {isInWishlist(coin.id) ? "❤️" : "🤍"}
                         </button>
                       </div>
                     </div>
@@ -431,5 +429,5 @@ export default function MarketPage() {
         />
       </div>
     </main>
-  );
+  );
 }

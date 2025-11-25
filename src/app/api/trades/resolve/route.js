@@ -59,7 +59,6 @@ export async function POST(request) {
     // Calculate payout if won
     let payout = 0;
     if (result === 'WON') {
-      // Return original amount plus the percentage return
       payout = trade.amount + (trade.amount * (trade.returnPct / 100));
     }
     

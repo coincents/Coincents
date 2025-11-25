@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
 import prismaPromise from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth";
 
 // PATCH - Admin approves or rejects withdraw request
 export async function PATCH(request) {
   const prisma = await prismaPromise;
   try {
+    const auth = await requireAdmin(request);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: 403 });
+    }
     const body = await request.json();
-    const { requestId, status } = body;
+    const { requestId, status, txHash, adminNotes } = body;
     
     // Validate required fields
     if (!requestId || !status) {
@@ -47,33 +52,42 @@ export async function PATCH(request) {
       );
     }
     
-    // Update withdraw request status
-    const updatedWithdrawRequest = await prisma.withdrawRequest.update({
-      where: { id: parseInt(requestId) },
-      data: {
-        status: status,
-        resolvedAt: new Date()
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            balance: true
-          }
-        }
-      }
-    });
-    
-    // If approved, deduct amount from user balance
-    if (status === 'APPROVED') {
-      await prisma.user.update({
-        where: { id: withdrawRequest.userId },
+    // Process update with optional refund on rejection
+    const updatedWithdrawRequest = await prisma.$transaction(async (tx) => {
+      const update = await tx.withdrawRequest.update({
+        where: { id: parseInt(requestId) },
         data: {
-          balance: withdrawRequest.user.balance - withdrawRequest.amount
+          status: status,
+          resolvedAt: new Date(),
+          txHash: txHash || withdrawRequest.txHash,
+          adminNotes: adminNotes || null,
         }
       });
-    }
+      if (status === 'REJECTED') {
+        // Refund reserved amount
+        const user = await tx.user.findUnique({ where: { id: withdrawRequest.userId } });
+        await tx.user.update({
+          where: { id: withdrawRequest.userId },
+          data: { balance: user.balance + withdrawRequest.amount }
+        });
+      }
+      // Audit log
+      await tx.auditLog.create({
+        data: {
+          actorUserId: auth.session.user.id,
+          action: "WITHDRAW_" + status,
+          entity: "WithdrawRequest",
+          entityId: String(requestId),
+          metadata: {
+            amount: withdrawRequest.amount,
+            toAddress: withdrawRequest.toAddress,
+            txHash: txHash || null,
+            adminNotes: adminNotes || null
+          }
+        }
+      });
+      return update;
+    });
     
     return NextResponse.json({
       success: true,

@@ -1,35 +1,52 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import styles from "./admin.module.css";
 import Navigation from "../../components/Navigation";
-import {
-  getEnhancedAdminDashboardData,
-  approveDeposit,
-  rejectDeposit,
-  approveWithdrawal,
-  rejectWithdrawal,
-  updateUserActivity,
-  exportData,
-} from "../../lib/enhanced-user-management";
+import { authClient } from "@/lib/auth-client";
 
 export default function AdminPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState("");
+  const router = useRouter();
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
-  const [activeTab, setActiveTab] = useState("users"); // 'users', 'deposits', 'withdrawals'
+  const [depositAddresses, setDepositAddresses] = useState([]);
+  const [addressErrors, setAddressErrors] = useState({});
+  const [activeTab, setActiveTab] = useState("users"); // 'users', 'deposits', 'withdrawals', 'settings'
   const [currentTime, setCurrentTime] = useState(new Date());
   const [statistics, setStatistics] = useState({
     totalUsers: 0,
     totalDeposits: 0,
     totalWithdrawals: 0,
+    totalDepositsUSD: 0,
+    totalWithdrawalsUSD: 0,
+    totalCurrentBalanceUSD: 0,
     pendingDeposits: 0,
     pendingWithdrawals: 0,
   });
-  const [loading, setLoading] = useState(false);
   const [adminNotes, setAdminNotes] = useState("");
+
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data } = await authClient.getSession();
+        if (data?.user) {
+          setSession(data);
+          setLoading(false);
+        } else {
+          router.push("/admin/sign-in");
+        }
+      } catch (error) {
+        console.error("Auth check failed:", error);
+        router.push("/admin/sign-in");
+      }
+    };
+    checkAuth();
+  }, [router]);
 
   // Update time every second
   useEffect(() => {
@@ -39,83 +56,96 @@ export default function AdminPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // Load admin data when authenticated
+  // Load admin data when session is available
   useEffect(() => {
-    if (isAuthenticated) {
+    if (session) {
       loadAdminData();
     }
-  }, [isAuthenticated]);
+  }, [session]);
 
   const loadAdminData = async () => {
     try {
-      console.log("Loading admin data...");
-      const data = await getEnhancedAdminDashboardData();
-      console.log("Admin data loaded successfully:", data);
-      console.log("Users sample:", data.users[0]);
-      console.log("Deposits sample:", data.deposits[0]);
-      console.log("Withdrawals sample:", data.withdrawals[0]);
-      setUsers(data.users);
-      setDeposits(data.deposits);
-      setWithdrawals(data.withdrawals);
-      setStatistics(data.statistics);
+      // Fetch all data in parallel (with credentials to send session cookies)
+      const [usersRes, withdrawalsRes, depositAddressesRes, depositsRes] = await Promise.all([
+        fetch("/api/users", { credentials: "include" }),
+        fetch("/api/withdraw/requests", { credentials: "include" }),
+        fetch("/api/deposit-addresses/", { credentials: "include" }),
+        fetch("/api/deposits/", { credentials: "include" }),
+      ]);
+
+      const usersData = await usersRes.json();
+      const withdrawalsData = await withdrawalsRes.json();
+      const depositAddressesData = await depositAddressesRes.json();
+      const depositsData = await depositsRes.json();
+
+      const fetchedUsers = usersData.users || [];
+      const fetchedWithdrawals = withdrawalsData.withdrawRequests || [];
+      const fetchedDepositAddresses = depositAddressesData.addresses || [];
+      const fetchedDeposits = depositsData.deposits || [];
+
+      setUsers(fetchedUsers);
+      setWithdrawals(fetchedWithdrawals);
+      setDepositAddresses(fetchedDepositAddresses);
+      setDeposits(fetchedDeposits);
+
+      // Calculate statistics from user data, deposits, and withdrawals
+      const totalCurrentBalanceUSD = fetchedUsers.reduce((sum, user) => sum + (user.balance || 0), 0);
+      
+      // Calculate total deposits (confirmed only)
+      const totalDepositsUSD = fetchedDeposits
+        .filter((d) => d.status === "CONFIRMED")
+        .reduce((sum, d) => sum + (d.amount || 0), 0);
+      
+      const pendingDeposits = fetchedDeposits.filter((d) => d.status === "PENDING").length;
+      
+      // Calculate total withdrawals (approved + pending)
+      const totalWithdrawalsUSD = fetchedWithdrawals
+        .filter((w) => w.status === "APPROVED" || w.status === "PENDING")
+        .reduce((sum, w) => sum + (w.amount || 0), 0);
+      
+      const pendingWithdrawals = fetchedWithdrawals.filter((w) => w.status === "PENDING").length;
+
+      setStatistics({
+        totalUsers: fetchedUsers.length,
+        totalDeposits: fetchedDeposits.length,
+        totalWithdrawals: fetchedWithdrawals.length,
+        totalDepositsUSD: totalDepositsUSD,
+        totalWithdrawalsUSD: totalWithdrawalsUSD,
+        totalCurrentBalanceUSD: totalCurrentBalanceUSD,
+        pendingDeposits: pendingDeposits,
+        pendingWithdrawals: pendingWithdrawals,
+      });
+
+      console.log("Admin data loaded:", {
+        users: fetchedUsers.length,
+        withdrawals: fetchedWithdrawals.length,
+      });
     } catch (error) {
-      console.error(
-        "Failed to load admin data with enhanced functions:",
-        error
-      );
-      console.log("Falling back to basic data loading...");
-
-      try {
-        // Fallback: try to load basic data without USD calculations
-        const response = await fetch("/api/users");
-        if (response.ok) {
-          const userData = await response.json();
-          const users = userData.users || [];
-
-          // Set basic statistics
-          setUsers(users);
-          setDeposits([]);
-          setWithdrawals([]);
-          setStatistics({
-            totalUsers: users.length,
-            totalDeposits: 0,
-            totalWithdrawals: 0,
-            pendingDeposits: 0,
-            pendingWithdrawals: 0,
-          });
-        } else {
-          throw new Error("Failed to fetch basic user data");
-        }
-      } catch (fallbackError) {
-        console.error("Fallback data loading also failed:", fallbackError);
-        // Set empty data to prevent UI from crashing
-        setUsers([]);
-        setDeposits([]);
-        setWithdrawals([]);
-        setStatistics({
-          totalUsers: 0,
-          totalDeposits: 0,
-          totalWithdrawals: 0,
-          pendingDeposits: 0,
-          pendingWithdrawals: 0,
-        });
-      }
+      console.error("Failed to load admin data:", error);
+      // Set empty data on error
+      setUsers([]);
+      setDeposits([]);
+      setWithdrawals([]);
+      setStatistics({
+        totalUsers: 0,
+        totalDeposits: 0,
+        totalWithdrawals: 0,
+        totalDepositsUSD: 0,
+        totalWithdrawalsUSD: 0,
+        totalCurrentBalanceUSD: 0,
+        pendingDeposits: 0,
+        pendingWithdrawals: 0,
+      });
     }
   };
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (password === "nndp007@+-") {
-      setIsAuthenticated(true);
-      setPassword("");
-    } else {
-      alert("Invalid password");
+  const handleLogout = async () => {
+    try {
+      await authClient.signOut();
+      router.push("/admin/sign-in");
+    } catch (error) {
+      console.error("Logout failed:", error);
     }
-  };
-
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setPassword("");
   };
 
   const formatDate = (dateString) => {
@@ -141,14 +171,7 @@ export default function AdminPage() {
   const handleApproveDeposit = async (depositId) => {
     setLoading(true);
     try {
-      const result = await approveDeposit(depositId, adminNotes);
-      if (result) {
-        alert("Deposit approved successfully!");
-        loadAdminData(); // Refresh data
-        setAdminNotes("");
-      } else {
-        alert("Failed to approve deposit");
-      }
+      alert("Deposit approval not implemented in this version.");
     } catch (error) {
       console.error("Error approving deposit:", error);
       alert("Error approving deposit");
@@ -160,14 +183,7 @@ export default function AdminPage() {
   const handleRejectDeposit = async (depositId) => {
     setLoading(true);
     try {
-      const result = await rejectDeposit(depositId, adminNotes);
-      if (result) {
-        alert("Deposit rejected successfully!");
-        loadAdminData(); // Refresh data
-        setAdminNotes("");
-      } else {
-        alert("Failed to reject deposit");
-      }
+      alert("Deposit rejection not implemented in this version.");
     } catch (error) {
       console.error("Error rejecting deposit:", error);
       alert("Error rejecting deposit");
@@ -179,13 +195,20 @@ export default function AdminPage() {
   const handleApproveWithdrawal = async (withdrawalId) => {
     setLoading(true);
     try {
-      const result = await approveWithdrawal(withdrawalId, null, adminNotes);
-      if (result) {
+      const res = await fetch("/api/withdraw/manage", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requestId: withdrawalId, status: "APPROVED", adminNotes }),
+      });
+      if (res.ok) {
         alert("Withdrawal approved successfully!");
-        loadAdminData(); // Refresh data
+        loadAdminData();
         setAdminNotes("");
       } else {
-        alert("Failed to approve withdrawal");
+        const error = await res.json();
+        alert(`Failed to approve withdrawal: ${error.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error("Error approving withdrawal:", error);
@@ -198,13 +221,20 @@ export default function AdminPage() {
   const handleRejectWithdrawal = async (withdrawalId) => {
     setLoading(true);
     try {
-      const result = await rejectWithdrawal(withdrawalId, adminNotes);
-      if (result) {
+      const res = await fetch("/api/withdraw/manage", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requestId: withdrawalId, status: "REJECTED", adminNotes }),
+      });
+      if (res.ok) {
         alert("Withdrawal rejected successfully!");
-        loadAdminData(); // Refresh data
+        loadAdminData();
         setAdminNotes("");
       } else {
-        alert("Failed to reject withdrawal");
+        const error = await res.json();
+        alert(`Failed to reject withdrawal: ${error.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error("Error rejecting withdrawal:", error);
@@ -212,6 +242,61 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUpdateDepositAddresses = async () => {
+    // Client-side validation
+    const errors = [];
+    for (const addr of depositAddresses) {
+      if (!addr.address || addr.address.trim() === "") {
+        errors.push(`${addr.token}: Address is required`);
+      }
+      if (!addr.network || addr.network.trim() === "") {
+        errors.push(`${addr.token}: Network is required`);
+      }
+    }
+
+    if (errors.length > 0) {
+      alert("Please fix the following errors:\n\n" + errors.join("\n"));
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/deposit-addresses/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ addresses: depositAddresses }),
+      });
+      
+      if (res.ok) {
+        alert("✅ Deposit addresses updated successfully!");
+        loadAdminData();
+      } else {
+        const error = await res.json();
+        let errorMessage = error.error || "Unknown error";
+        if (error.details && Array.isArray(error.details)) {
+          errorMessage += "\n\n" + error.details.map(d => 
+            d.token ? `${d.token}: ${d.error || d.message}` : JSON.stringify(d)
+          ).join("\n");
+        }
+        alert(`❌ Failed to update deposit addresses:\n\n${errorMessage}`);
+      }
+    } catch (error) {
+      console.error("Error updating deposit addresses:", error);
+      alert("❌ Error updating deposit addresses: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDepositAddressChange = (token, field, value) => {
+    setDepositAddresses((prev) =>
+      prev.map((addr) =>
+        addr.token === token ? { ...addr, [field]: value } : addr
+      )
+    );
   };
 
   const handleExportData = async () => {
@@ -223,7 +308,7 @@ export default function AdminPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `coincents-data-${
+      a.download = `walletbase-data-${
         new Date().toISOString().split("T")[0]
       }.json`;
       document.body.appendChild(a);
@@ -247,36 +332,25 @@ export default function AdminPage() {
     loadAdminData();
   };
 
-  // Admin login screen
-  if (!isAuthenticated) {
+  // Show loading state while checking authentication
+  if (loading) {
     return (
       <main className={styles.container}>
         <div className={styles.loginContainer}>
           <div className={styles.loginCard}>
             <div className={styles.loginHeader}>
               <h1>🔐 Admin Panel</h1>
-              <p>Enter password to access admin dashboard</p>
+              <p>Loading...</p>
             </div>
-            <form onSubmit={handleLogin} className={styles.loginForm}>
-              <div className={styles.inputGroup}>
-                <label>Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter admin password"
-                  className={styles.passwordInput}
-                  required
-                />
-              </div>
-              <button type="submit" className={styles.loginButton}>
-                Login
-              </button>
-            </form>
           </div>
         </div>
       </main>
     );
+  }
+
+  // If no session, redirect will happen via useEffect
+  if (!session) {
+    return null;
   }
 
   // Admin dashboard
@@ -399,6 +473,14 @@ export default function AdminPage() {
         >
           📤 Withdrawals ({withdrawals?.length ?? 0})
         </button>
+        <button
+          className={`${styles.tab} ${
+            activeTab === "settings" ? styles.activeTab : ""
+          }`}
+          onClick={() => setActiveTab("settings")}
+        >
+          ⚙️ Settings
+        </button>
       </nav>
 
       {/* Content Area */}
@@ -439,12 +521,12 @@ export default function AdminPage() {
                         key={user._id || user.userId}
                         className={styles.tableRow}
                       >
-                        <td className={styles.userId}>{user.userId}</td>
+                        <td className={styles.userId}>{user.id}</td>
                         <td className={styles.walletAddress}>
-                          {user.walletAddress}
+                          {user.ethereumAddress || user.email || "N/A"}
                         </td>
                         <td className={styles.joinDate}>
-                          {formatDate(user.joinDate)}
+                          {formatDate(user.createdAt)}
                         </td>
                         <td className={styles.deposits}>
                           $
@@ -468,7 +550,7 @@ export default function AdminPage() {
                         </td>
                         <td className={styles.currentBalance}>
                           $
-                          {(user.currentBalanceUSD ?? 0).toLocaleString(
+                          {(user.balance ?? 0).toLocaleString(
                             "en-US",
                             {
                               minimumFractionDigits: 2,
@@ -477,13 +559,13 @@ export default function AdminPage() {
                           )}
                         </td>
                         <td className={styles.lastActivity}>
-                          {formatDate(user.lastActivity)}
+                          {formatDate(user.createdAt)}
                         </td>
                         <td className={styles.status}>
                           <span
                             className={`${styles.statusBadge} ${styles.active}`}
                           >
-                            {user.status}
+                            Active
                           </span>
                         </td>
                       </tr>
@@ -660,29 +742,29 @@ export default function AdminPage() {
                   <tbody>
                     {withdrawals.map((withdrawal) => (
                       <tr
-                        key={withdrawal._id || withdrawal.destinationAddress}
+                        key={withdrawal.id || withdrawal.toAddress}
                         className={styles.tableRow}
                       >
                         <td className={styles.userId}>{withdrawal.userId}</td>
-                        <td className={styles.token}>{withdrawal.token}</td>
+                        <td className={styles.token}>USD</td>
                         <td className={styles.amount}>
-                          {formatAmount(withdrawal.amount, withdrawal.token)}
+                          ${withdrawal.amount?.toFixed(2) || '0.00'}
                         </td>
                         <td className={styles.usdValue}>
                           $
-                          {(withdrawal.usdAmount ?? 0).toLocaleString("en-US", {
+                          {(withdrawal.amount ?? 0).toLocaleString("en-US", {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
                           })}
                         </td>
                         <td className={styles.walletAddress}>
-                          {withdrawal.destinationAddress}
+                          {withdrawal.toAddress}
                         </td>
                         <td className={styles.transferMethod}>
-                          {withdrawal.transferMethod}
+                          Simulator
                         </td>
                         <td className={styles.date}>
-                          {formatDate(withdrawal.requestDate)}
+                          {formatDate(withdrawal.createdAt)}
                         </td>
                         <td>
                           <span
@@ -695,12 +777,12 @@ export default function AdminPage() {
                           </span>
                         </td>
                         <td className={styles.actions}>
-                          {withdrawal.status === "pending" ? (
+                          {withdrawal.status === "PENDING" ? (
                             <>
                               <button
                                 className={styles.approveButton}
                                 onClick={() =>
-                                  handleApproveWithdrawal(withdrawal._id)
+                                  handleApproveWithdrawal(withdrawal.id)
                                 }
                                 disabled={loading}
                               >
@@ -709,7 +791,7 @@ export default function AdminPage() {
                               <button
                                 className={styles.rejectButton}
                                 onClick={() =>
-                                  handleRejectWithdrawal(withdrawal._id)
+                                  handleRejectWithdrawal(withdrawal.id)
                                 }
                                 disabled={loading}
                               >
@@ -718,8 +800,8 @@ export default function AdminPage() {
                             </>
                           ) : (
                             <span className={styles.processedDate}>
-                              {withdrawal.processedDate
-                                ? formatDate(withdrawal.processedDate)
+                              {withdrawal.resolvedAt
+                                ? formatDate(withdrawal.resolvedAt)
                                 : "N/A"}
                             </span>
                           )}
@@ -729,6 +811,94 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </section>
+        )}
+
+        {activeTab === "settings" && (
+          <section className={styles.settingsSection}>
+            <div className={styles.sectionHeader}>
+              <h2>⚙️ Settings</h2>
+              <p>Manage deposit addresses and system configuration</p>
+            </div>
+
+            <div className={styles.settingsContainer}>
+              <div className={styles.settingsCard}>
+                <h3>💰 Deposit Addresses</h3>
+                <p className={styles.settingsDescription}>
+                  Configure the wallet addresses where users will send deposits. These addresses will be displayed in QR codes and copy-paste fields.
+                </p>
+
+                {depositAddresses.length > 0 ? (
+                  <div className={styles.depositAddressesForm}>
+                    {depositAddresses.map((addr) => (
+                      <div key={addr.token} className={styles.addressFormGroup}>
+                        <div className={styles.addressHeader}>
+                          <h4>{addr.token}</h4>
+                          <span className={styles.networkBadge}>{addr.network}</span>
+                        </div>
+                        <div className={styles.inputGroup}>
+                          <label>Address:</label>
+                          <input
+                            type="text"
+                            value={addr.address}
+                            onChange={(e) =>
+                              handleDepositAddressChange(addr.token, "address", e.target.value)
+                            }
+                            className={styles.addressInput}
+                            placeholder={`Enter ${addr.token} address`}
+                          />
+                        </div>
+                        <div className={styles.inputGroup}>
+                          <label>Network:</label>
+                          <select
+                            value={addr.network || ""}
+                            onChange={(e) =>
+                              handleDepositAddressChange(addr.token, "network", e.target.value)
+                            }
+                            className={styles.networkSelect}
+                          >
+                            <option value="">Select Network</option>
+                            <option value="Bitcoin">Bitcoin</option>
+                            <option value="Ethereum">Ethereum</option>
+                            <option value="Tron">Tron</option>
+                            <option value="Solana">Solana</option>
+                            <option value="Polygon">Polygon</option>
+                            <option value="BSC">BSC (Binance Smart Chain)</option>
+                            <option value="Arbitrum">Arbitrum</option>
+                            <option value="Optimism">Optimism</option>
+                          </select>
+                        </div>
+                        <div className={styles.inputGroup}>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={addr.isActive !== false}
+                              onChange={(e) =>
+                                handleDepositAddressChange(addr.token, "isActive", e.target.checked)
+                              }
+                            />
+                            Active
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+
+                    <button
+                      onClick={handleUpdateDepositAddresses}
+                      className={styles.saveButton}
+                      disabled={loading}
+                    >
+                      {loading ? "Saving..." : "💾 Save Changes"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <p>No deposit addresses configured.</p>
+                    <p>Run the seed script to initialize default addresses.</p>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}

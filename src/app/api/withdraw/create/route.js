@@ -1,19 +1,53 @@
 import { NextResponse } from 'next/server';
 import prismaPromise from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
+import { createWithdrawSchema } from "@/lib/validation/withdraw";
+import { rateLimit } from "@/lib/rate-limit";
 
 // POST - Create new withdraw request
 export async function POST(request) {
   const prisma = await prismaPromise;
   try {
+    // Try Better Auth session first
+    const auth = await requireUser(request);
+    let userId;
+    
+    if (auth.ok) {
+      userId = auth.session.user.id;
+    } else {
+      // Fallback: Check for userId in body (for wallet-based auth)
+      const body = await request.json();
+      if (!body.userId) {
+        return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+      }
+      userId = body.userId;
+      // Re-parse body for the rest of the function
+      request.json = () => Promise.resolve(body);
+    }
+    
     const body = await request.json();
-    const { userId, amount, proofImage, txHash } = body;
+    const ip = request.headers.get("x-forwarded-for") || "local";
+    const rl = rateLimit(`withdraw:create:${ip}`, 10, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+    }
+    const parsed = createWithdrawSchema.safeParse({
+      amount: Number(body?.amount),
+      toAddress: body?.toAddress,
+      proofImage: body?.proofImage,
+      txHash: body?.txHash,
+    });
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, error: 'Invalid payload' }, { status: 400 });
+    }
+    const { amount, toAddress, proofImage, txHash } = parsed.data;
     
     // Validate required fields
-    if (!userId || !amount || !proofImage) {
+    if (!amount || !toAddress) {
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Missing required fields: userId, amount, proofImage' 
+          error: 'Missing required fields: amount, toAddress' 
         },
         { status: 400 }
       );
@@ -27,44 +61,43 @@ export async function POST(request) {
       );
     }
     
-    // Check if user exists
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
-    
-    if (!user) {
+    // Check user and balance
+    const dbUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!dbUser) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
       );
     }
     
-    // Check if user has sufficient balance
-    if (user.balance < amount) {
+    if (dbUser.balance < amount) {
       return NextResponse.json(
         { success: false, error: 'Insufficient balance for this withdrawal request' },
         { status: 400 }
       );
     }
     
-    // Create new withdraw request
-    const newWithdrawRequest = await prisma.withdrawRequest.create({
-      data: {
-        userId,
-        amount: parseFloat(amount),
-        proofImage,
-        txHash: txHash || null,
-        status: 'PENDING'
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            balance: true
+    // Reserve funds and create request atomically
+    const newWithdrawRequest = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { balance: dbUser.balance - parseFloat(amount) }
+      });
+      return tx.withdrawRequest.create({
+        data: {
+          userId: userId,
+          amount: parseFloat(amount),
+          proofImage: proofImage || "",
+          txHash: txHash || null,
+          toAddress: String(toAddress),
+          status: 'PENDING'
+        },
+        include: {
+          user: {
+            select: { id: true, balance: true }
           }
         }
-      }
+      });
     });
     
     return NextResponse.json({

@@ -2,8 +2,8 @@
 
 import styles from "../../styles/Landing.module.css";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
-import Link from "next/link";
 import { ethers } from "ethers";
 import QRCode from "qrcode";
 import { RECEIVING_ADDRESSES } from "@/lib/config";
@@ -35,19 +35,26 @@ import {
   createTransaction,
   createDeposit,
   createWithdrawal,
-} from "@/lib/enhanced-user-management";
-import { useUser } from "@/contexts/UserContext";
+} from "@/lib/user-actions";
+import { authClient } from "@/lib/auth-client";
+import { useSIWE } from "@/hooks/useSIWE";
 
 export default function PortfolioApp() {
+  const router = useRouter();
   const { address: rkAddress, isConnected } = useAccount();
-  const {
-    userId,
-    walletAddress,
-    backendUser,
-    isLoadingUser,
-    updateUser,
-    clearUser,
-  } = useUser();
+  
+  // SIWE authentication
+  const { signIn: siweSignIn, isAuthenticating: isSIWEAuthenticating } = useSIWE();
+  
+  // Local state for user data and session
+  const [session, setSession] = useState(null);
+  const [authUser, setAuthUser] = useState(null);
+  const [backendUser, setBackendUser] = useState(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(false);
+  const [hasAttemptedSIWE, setHasAttemptedSIWE] = useState(false);
+  
+  // Computed values
+  const userId = authUser?.id || backendUser?.id;
 
   const [cryptoData, setCryptoData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,16 +78,28 @@ export default function PortfolioApp() {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
   const [transactionHash, setTransactionHash] = useState("");
   const [transactionScreenshot, setTransactionScreenshot] = useState(null);
+  const [depositAddresses, setDepositAddresses] = useState({
+    BTC: RECEIVING_ADDRESSES.BTC,
+    ETH: RECEIVING_ADDRESSES.ETH,
+    USDT: RECEIVING_ADDRESSES.USDT,
+    USDC: RECEIVING_ADDRESSES.ETH,
+    BNB: RECEIVING_ADDRESSES.ETH,
+    SOL: "",
+  });
 
   const [balances, setBalances] = useState({
     ETH: "0.0000",
     BTC: "0.00000000",
+    BNB: "0.0000",
+    SOL: "0.0000",
     USDT: "0.00",
     USDC: "0.00",
   });
   const [usdBalances, setUsdBalances] = useState({
     ETH: 0,
     BTC: 0,
+    BNB: 0,
+    SOL: 0,
     USDT: 0,
     USDC: 0,
     total: 0,
@@ -88,34 +107,152 @@ export default function PortfolioApp() {
   const [prices, setPrices] = useState({});
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null);
 
-  // Keep context in sync when directly landing on /portfolio
+  // Check for existing session on mount
   useEffect(() => {
-    const sync = async () => {
-      if (!isConnected || !rkAddress) return;
-      if (
-        !walletAddress ||
-        walletAddress.toLowerCase() !== rkAddress.toLowerCase()
-      ) {
-        const newUserId = generateUserIdFromAddress(rkAddress);
-        updateUser(newUserId, rkAddress);
-      }
+    const checkSession = async () => {
       try {
-        await fetch("/api/auth/wallet", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address: rkAddress }),
-        });
-      } catch (e) {
-        console.warn("Wallet upsert failed", e);
+        const { data } = await authClient.getSession();
+        if (data?.session && data?.user) {
+          setSession(data.session);
+          setAuthUser(data.user);
+        }
+      } catch (error) {
+        console.log("No active session");
       }
     };
-    sync();
-  }, [isConnected, rkAddress]);
+    checkSession();
+  }, []);
+
+  // Handle SIWE authentication when wallet connects
+  useEffect(() => {
+    const handleWalletAuth = async () => {
+      if (!isConnected || !rkAddress) {
+        setBackendUser(null);
+        setHasAttemptedSIWE(false);
+        return;
+      }
+
+      // Check if already authenticated with Better Auth (email/password or SIWE)
+      if (session?.user) {
+        // If user has no ethereumAddress, they're authenticated via email/password
+        // Skip SIWE and just load their user data
+        if (!session.user.ethereumAddress) {
+          console.log("📧 User authenticated via email/password, skipping SIWE");
+          try {
+            const res = await fetch(`/api/users?userId=${session.user.id}`, {
+              credentials: "include",
+            });
+            const userData = await res.json();
+            if (userData?.success && userData.user) {
+              setBackendUser(userData.user);
+            }
+          } catch (e) {
+            console.warn("Failed to load user data", e);
+          }
+          return;
+        }
+        
+        // Check if the session wallet matches connected wallet
+        const sessionWallet = session.user.ethereumAddress.toLowerCase();
+        const connectedWallet = rkAddress.toLowerCase();
+        
+        if (sessionWallet === connectedWallet) {
+          // Load user data
+          try {
+            const res = await fetch(`/api/users?userId=${session.user.id}`, {
+              credentials: "include",
+            });
+            const userData = await res.json();
+            if (userData?.success && userData.user) {
+              setBackendUser(userData.user);
+            }
+          } catch (e) {
+            console.warn("Failed to load user data", e);
+          }
+          return;
+        } else {
+          // Different wallet connected - reset attempt flag
+          setHasAttemptedSIWE(false);
+        }
+      }
+
+      // Only trigger SIWE once per wallet connection
+      if (hasAttemptedSIWE) {
+        return;
+      }
+
+      // Not authenticated or different wallet - trigger SIWE
+      try {
+        setIsLoadingUser(true);
+        setHasAttemptedSIWE(true);
+        
+        console.log("🔐 Starting SIWE authentication...");
+        const result = await siweSignIn();
+        
+        if (result.success) {
+          console.log("✅ SIWE authentication successful!");
+          
+          // Update session state
+          setSession(result.session);
+          setAuthUser(result.user);
+          
+          // Load user data
+          try {
+            const res = await fetch(`/api/users?userId=${result.user.id}`, {
+              credentials: "include",
+            });
+            const userData = await res.json();
+            if (userData?.success && userData.user) {
+              setBackendUser(userData.user);
+            }
+          } catch (e) {
+            console.warn("Failed to load user data", e);
+          }
+        } else {
+          console.error("❌ SIWE authentication failed:", result.error);
+          // Don't show alert for user rejection
+          if (!result.error?.includes('rejected') && !result.error?.includes('denied')) {
+            console.warn("SIWE authentication failed, but continuing without session");
+          }
+        }
+        
+      } catch (error) {
+        console.error("SIWE authentication error:", error);
+      } finally {
+        setIsLoadingUser(false);
+      }
+    };
+
+    handleWalletAuth();
+  }, [isConnected, rkAddress, session, siweSignIn, hasAttemptedSIWE]);
 
   // Timers and data loading
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Fetch deposit addresses from API
+  useEffect(() => {
+    const fetchDepositAddresses = async () => {
+      try {
+        const res = await fetch("/api/deposit-addresses/");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.addresses) {
+            const addressMap = {};
+            data.addresses.forEach((addr) => {
+              addressMap[addr.token] = addr.address;
+            });
+            setDepositAddresses(addressMap);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch deposit addresses:", error);
+        // Keep using env fallback addresses
+      }
+    };
+    fetchDepositAddresses();
   }, []);
 
   useEffect(() => {
@@ -194,19 +331,19 @@ export default function PortfolioApp() {
   // Wallet balances
   useEffect(() => {
     const fetchBalances = async () => {
-      if (!walletAddress) return;
+      if (!rkAddress) return;
       try {
         const provider =
           typeof window !== "undefined" && window.ethereum
             ? new ethers.BrowserProvider(window.ethereum)
             : null;
         if (!provider) return;
-        if (!ethers.isAddress(walletAddress)) {
-          console.error("Invalid wallet address:", walletAddress);
+        if (!ethers.isAddress(rkAddress)) {
+          console.error("Invalid wallet address:", rkAddress);
           return;
         }
 
-        const ethBalance = await provider.getBalance(walletAddress);
+        const ethBalance = await provider.getBalance(rkAddress);
         const ethBalanceFormatted = ethers.formatEther(ethBalance);
         let btcBalance = "0.00000000";
         try {
@@ -218,9 +355,9 @@ export default function PortfolioApp() {
         let usdtBalance = "0.00";
         let usdcBalance = "0.00";
         try {
-          if (ethers.isAddress(walletAddress)) {
+          if (ethers.isAddress(rkAddress)) {
             usdtBalance = (
-              await getUSDTBalance(walletAddress, provider)
+              await getUSDTBalance(rkAddress, provider)
             ).toFixed(2);
           }
         } catch (error) {
@@ -228,9 +365,9 @@ export default function PortfolioApp() {
         }
 
         try {
-          if (ethers.isAddress(walletAddress)) {
+          if (ethers.isAddress(rkAddress)) {
             usdcBalance = (
-              await getUSDCBalance(walletAddress, provider)
+              await getUSDCBalance(rkAddress, provider)
             ).toFixed(2);
           }
         } catch (error) {
@@ -248,19 +385,22 @@ export default function PortfolioApp() {
       }
     };
     fetchBalances();
-  }, [walletAddress]);
+  }, [rkAddress]);
 
   const getReceivingAddress = (token) => {
-    switch (token) {
-      case "BTC":
-        return RECEIVING_ADDRESSES.BTC;
-      case "USDT":
-        return RECEIVING_ADDRESSES.USDT;
-      case "ETH":
-      case "USDC":
-      default:
-        return RECEIVING_ADDRESSES.ETH;
-    }
+    return depositAddresses[token] || depositAddresses.ETH || "";
+  };
+
+  const getNetworkName = (token) => {
+    const networkMap = {
+      BTC: "Bitcoin Network",
+      ETH: "Ethereum Mainnet",
+      BNB: "BSC (Binance Smart Chain)",
+      SOL: "Solana Network",
+      USDT: "Ethereum Mainnet",
+      USDC: "Ethereum Mainnet",
+    };
+    return networkMap[token] || "Unknown Network";
   };
 
   const copyToClipboard = async (text) => {
@@ -327,7 +467,7 @@ export default function PortfolioApp() {
     try {
       const proofData = {
         userId,
-        walletAddress,
+        rkAddress,
         token: selectedToken,
         transactionHash: transactionHash.slice(-6),
         screenshot: transactionScreenshot,
@@ -336,7 +476,7 @@ export default function PortfolioApp() {
       console.log("Proof submitted:", proofData);
       createDeposit(
         userId,
-        walletAddress,
+        rkAddress,
         selectedToken,
         depositAmount,
         transactionHash,
@@ -369,7 +509,7 @@ export default function PortfolioApp() {
   };
 
   const handleDeposit = async () => {
-    if (!walletAddress) {
+    if (!rkAddress) {
       alert("Please connect your wallet first.");
       return;
     }
@@ -387,7 +527,7 @@ export default function PortfolioApp() {
         const signer = provider ? await provider.getSigner() : null;
         if (!signer) throw new Error("Wallet not connected");
         const amountInWei = ethers.parseEther(depositAmount);
-        const tx = { to: walletAddress, value: amountInWei };
+        const tx = { to: rkAddress, value: amountInWei };
         const transaction = await signer.sendTransaction(tx);
         await transaction.wait();
         alert(`ETH deposit successful! Transaction hash: ${transaction.hash}`);
@@ -397,7 +537,7 @@ export default function PortfolioApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId,
-              walletAddress,
+              rkAddress,
               token: "ETH",
               type: "deposit",
               amount: parseFloat(depositAmount),
@@ -408,14 +548,14 @@ export default function PortfolioApp() {
         } catch {}
         await createTransaction(
           userId,
-          walletAddress,
+          rkAddress,
           "ETH",
           "deposit",
           depositAmount,
           transaction.hash
         );
         if (provider) {
-          const newEthBalance = await provider.getBalance(walletAddress);
+          const newEthBalance = await provider.getBalance(rkAddress);
           const ethBalanceFormatted = ethers.formatEther(newEthBalance);
           setBalances((prev) => ({
             ...prev,
@@ -423,7 +563,7 @@ export default function PortfolioApp() {
           }));
         }
       } else if (selectedToken === "BTC") {
-        const depositAddress = RECEIVING_ADDRESSES.BTC;
+        const depositAddress = depositAddresses.BTC;
         alert(
           `BTC deposit initiated!\n\nAmount: ${depositAmount} BTC\nTo: ${depositAddress}\n\nNote: Real BTC transactions require private key access. This is a demo.`
         );
@@ -433,7 +573,7 @@ export default function PortfolioApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId,
-              walletAddress,
+              rkAddress,
               token: "BTC",
               type: "deposit",
               amount: parseFloat(depositAmount),
@@ -456,14 +596,14 @@ export default function PortfolioApp() {
         const signer = provider ? await provider.getSigner() : null;
         if (!signer) throw new Error("Wallet not connected");
         if (!provider) throw new Error("Provider not available");
-        const currentBalance = await getUSDTBalance(walletAddress, provider);
+        const currentBalance = await getUSDTBalance(rkAddress, provider);
         if (parseFloat(depositAmount) > currentBalance)
           throw new Error(
             `Insufficient USDT balance. Available: ${currentBalance} USDT`
           );
-        const depositAddress = RECEIVING_ADDRESSES.USDT;
+        const depositAddress = depositAddresses.USDT;
         const result = await transferUSDT(
-          walletAddress,
+          rkAddress,
           depositAddress,
           depositAmount,
           signer
@@ -477,7 +617,7 @@ export default function PortfolioApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId,
-              walletAddress,
+              rkAddress,
               token: "USDT",
               type: "deposit",
               amount: parseFloat(depositAmount),
@@ -488,13 +628,13 @@ export default function PortfolioApp() {
         } catch {}
         await createTransaction(
           userId,
-          walletAddress,
+          rkAddress,
           "USDT",
           "deposit",
           depositAmount,
           result.txHash
         );
-        const newBalance = await getUSDTBalance(walletAddress, provider);
+        const newBalance = await getUSDTBalance(rkAddress, provider);
         setBalances((prev) => ({ ...prev, USDT: newBalance.toFixed(2) }));
       } else if (selectedToken === "USDC") {
         const provider =
@@ -504,14 +644,14 @@ export default function PortfolioApp() {
         const signer = provider ? await provider.getSigner() : null;
         if (!signer) throw new Error("Wallet not connected");
         if (!provider) throw new Error("Provider not available");
-        const currentBalance = await getUSDCBalance(walletAddress, provider);
+        const currentBalance = await getUSDCBalance(rkAddress, provider);
         if (parseFloat(depositAmount) > currentBalance)
           throw new Error(
             `Insufficient USDC balance. Available: ${currentBalance} USDC`
           );
-        const depositAddress = RECEIVING_ADDRESSES.USDT;
+        const depositAddress = depositAddresses.USDC;
         const result = await transferUSDC(
-          walletAddress,
+          rkAddress,
           depositAddress,
           depositAmount,
           signer
@@ -525,7 +665,7 @@ export default function PortfolioApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId,
-              walletAddress,
+              rkAddress,
               token: "USDC",
               type: "deposit",
               amount: parseFloat(depositAmount),
@@ -536,13 +676,13 @@ export default function PortfolioApp() {
         } catch {}
         await createTransaction(
           userId,
-          walletAddress,
+          rkAddress,
           "USDC",
           "deposit",
           depositAmount,
           result.txHash
         );
-        const newBalance = await getUSDCBalance(walletAddress, provider);
+        const newBalance = await getUSDCBalance(rkAddress, provider);
         setBalances((prev) => ({ ...prev, USDC: newBalance.toFixed(2) }));
       }
       setShowDepositModal(false);
@@ -556,17 +696,74 @@ export default function PortfolioApp() {
   };
 
   const handleWithdraw = async () => {
-    if (!walletAddress) {
+    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
+      alert("Please enter a valid amount.");
+      return;
+    }
+    if (!withdrawToAddress || withdrawToAddress.trim() === "") {
+      alert("Please enter a destination address.");
+      return;
+    }
+    // Check against backend USD balance (from wallet or auth session)
+    const currentBalance = backendUser?.balance || authUser?.balance || 0;
+    if (currentBalance <= 0) {
+      alert("You don't have any balance to withdraw. Please deposit funds first.");
+      return;
+    }
+    if (parseFloat(withdrawAmount) > currentBalance) {
+      alert(`Insufficient balance for withdrawal. Available: $${currentBalance.toFixed(2)} USD`);
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      // Get current user (from backend or auth session)
+      const currentUser = backendUser || authUser;
+      
+      // Check if user is loaded
+      if (!currentUser) {
+        throw new Error("Please connect your wallet or sign in first");
+      }
+
+      // Create withdrawal request (USD-based simulator)
+      const result = await createWithdrawal(
+        currentUser.id,
+        currentUser.ethereumAddress || rkAddress || "simulator",
+        selectedToken,
+        withdrawAmount,
+        withdrawToAddress.trim(),
+        "simulator"
+      );
+
+      if (result.success) {
+        alert(
+          `✅ Withdrawal request submitted successfully!\n\n` +
+          `Amount: $${withdrawAmount} USD\n` +
+          `Token: ${selectedToken}\n` +
+          `To: ${withdrawToAddress.trim()}\n\n` +
+          `Your request will be reviewed by an admin.`
+        );
+        setShowWithdrawModal(false);
+        setWithdrawAmount("");
+        setWithdrawToAddress("");
+      } else {
+        throw new Error(result.error || "Withdrawal request failed");
+      }
+    } catch (error) {
+      console.error("Withdrawal error:", error);
+      alert(`❌ Withdrawal failed: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Old blockchain-based withdraw handler (keeping for reference, can be removed)
+  const handleWithdrawBlockchain = async () => {
+    if (!rkAddress) {
       alert("Please connect your wallet first.");
       return;
     }
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
       alert("Please enter a valid amount.");
-      return;
-    }
-    const currentBalance = parseFloat(balances[selectedToken]);
-    if (parseFloat(withdrawAmount) > currentBalance) {
-      alert(`Insufficient ${selectedToken} balance for withdrawal.`);
       return;
     }
     setIsProcessing(true);
@@ -594,14 +791,14 @@ export default function PortfolioApp() {
         );
         await createTransaction(
           userId,
-          walletAddress,
+          rkAddress,
           "ETH",
           "withdrawal",
           withdrawAmount,
           transaction.hash
         );
         if (provider) {
-          const newEthBalance = await provider.getBalance(walletAddress);
+          const newEthBalance = await provider.getBalance(rkAddress);
           const ethBalanceFormatted = ethers.formatEther(newEthBalance);
           setBalances((prev) => ({
             ...prev,
@@ -617,7 +814,7 @@ export default function PortfolioApp() {
             "Please enter a valid Bitcoin address (bc1..., 1..., or 3...)"
           );
         const transferData = {
-          fromAddress: RECEIVING_ADDRESSES.BTC,
+          fromAddress: depositAddresses.BTC,
           toAddress: withdrawToAddress.trim(),
           amount: parseFloat(withdrawAmount),
           feeRate: selectedFeeRate,
@@ -635,7 +832,7 @@ export default function PortfolioApp() {
           );
           await createWithdrawal(
             userId,
-            walletAddress,
+            rkAddress,
             "BTC",
             withdrawAmount,
             withdrawToAddress.trim(),
@@ -643,7 +840,7 @@ export default function PortfolioApp() {
           );
           await createTransaction(
             userId,
-            walletAddress,
+            rkAddress,
             "BTC",
             "withdrawal",
             withdrawAmount,
@@ -660,7 +857,7 @@ export default function PortfolioApp() {
         const signer = provider ? await provider.getSigner() : null;
         if (!signer) throw new Error("Wallet not connected");
         if (!provider) throw new Error("Provider not available");
-        const currentBalance = await getUSDTBalance(walletAddress, provider);
+        const currentBalance = await getUSDTBalance(rkAddress, provider);
         if (parseFloat(withdrawAmount) > currentBalance)
           throw new Error(
             `Insufficient USDT balance. Available: ${currentBalance} USDT`
@@ -674,7 +871,7 @@ export default function PortfolioApp() {
           throw new Error(
             "Please enter a valid Ethereum address for USDT (0x...)"
           );
-        const depositAddress = RECEIVING_ADDRESSES.USDT;
+        const depositAddress = depositAddresses.USDT;
         const result = await transferUSDT(
           depositAddress,
           withdrawToAddress.trim(),
@@ -686,7 +883,7 @@ export default function PortfolioApp() {
         );
         await createWithdrawal(
           userId,
-          walletAddress,
+          rkAddress,
           "USDT",
           withdrawAmount,
           withdrawToAddress.trim(),
@@ -694,13 +891,13 @@ export default function PortfolioApp() {
         );
         await createTransaction(
           userId,
-          walletAddress,
+          rkAddress,
           "USDT",
           "withdrawal",
           withdrawAmount,
           result.txHash
         );
-        const newBalance = await getUSDTBalance(walletAddress, provider);
+        const newBalance = await getUSDTBalance(rkAddress, provider);
         setBalances((prev) => ({ ...prev, USDT: newBalance.toFixed(2) }));
       } else if (selectedToken === "USDC") {
         const provider =
@@ -710,7 +907,7 @@ export default function PortfolioApp() {
         const signer = provider ? await provider.getSigner() : null;
         if (!signer) throw new Error("Wallet not connected");
         if (!provider) throw new Error("Provider not available");
-        const currentBalance = await getUSDCBalance(walletAddress, provider);
+        const currentBalance = await getUSDCBalance(rkAddress, provider);
         if (parseFloat(withdrawAmount) > currentBalance)
           throw new Error(
             `Insufficient USDC balance. Available: ${currentBalance} USDC`
@@ -724,7 +921,7 @@ export default function PortfolioApp() {
           throw new Error(
             "Please enter a valid Ethereum address for USDC (0x...)"
           );
-        const depositAddress = RECEIVING_ADDRESSES.USDT;
+        const depositAddress = depositAddresses.USDC;
         const result = await transferUSDC(
           depositAddress,
           withdrawToAddress.trim(),
@@ -736,7 +933,7 @@ export default function PortfolioApp() {
         );
         await createWithdrawal(
           userId,
-          walletAddress,
+          rkAddress,
           "USDC",
           withdrawAmount,
           withdrawToAddress.trim(),
@@ -744,13 +941,13 @@ export default function PortfolioApp() {
         );
         await createTransaction(
           userId,
-          walletAddress,
+          rkAddress,
           "USDC",
           "withdrawal",
           withdrawAmount,
           result.txHash
         );
-        const newBalance = await getUSDCBalance(walletAddress, provider);
+        const newBalance = await getUSDCBalance(rkAddress, provider);
         setBalances((prev) => ({ ...prev, USDC: newBalance.toFixed(2) }));
       }
       setShowWithdrawModal(false);
@@ -826,7 +1023,7 @@ export default function PortfolioApp() {
         <div className={styles.walletCard}>
           <div className={styles.walletHeader}>
             <span className={styles.walletStatus}>
-              {walletAddress
+              {rkAddress
                 ? userId
                   ? `User ID: ${userId}`
                   : "User ID: Loading..."
@@ -859,6 +1056,8 @@ export default function PortfolioApp() {
                   $
                   {typeof backendUser?.balance === "number"
                     ? backendUser.balance.toFixed(2)
+                    : typeof authUser?.balance === "number"
+                    ? authUser.balance.toFixed(2)
                     : usdBalances.total?.toFixed(2) || "0.00"}
                 </span>
               </div>
@@ -902,7 +1101,7 @@ export default function PortfolioApp() {
                 setShowDepositModal(true);
                 generateQRCode(getReceivingAddress(selectedToken));
               }}
-              disabled={!walletAddress}
+              disabled={!rkAddress}
             >
               <span className={styles.actionIcon}>↓</span>
               Deposit
@@ -910,7 +1109,7 @@ export default function PortfolioApp() {
             <button
               className={styles.actionButton}
               onClick={() => setShowWithdrawModal(true)}
-              disabled={!walletAddress}
+              disabled={(!backendUser && !authUser) || ((backendUser?.balance || authUser?.balance || 0) <= 0)}
             >
               <span className={styles.actionIcon}>✈</span>
               Withdraw
@@ -949,6 +1148,8 @@ export default function PortfolioApp() {
                 >
                   <option value="ETH">Ethereum (ETH)</option>
                   <option value="BTC">Bitcoin (BTC)</option>
+                  <option value="BNB">Binance Coin (BNB)</option>
+                  <option value="SOL">Solana (SOL)</option>
                   <option value="USDT">Tether (USDT)</option>
                   <option value="USDC">USD Coin (USDC)</option>
                 </select>
@@ -956,13 +1157,13 @@ export default function PortfolioApp() {
               <div className={styles.modalInfo}>
                 <p>
                   Current Balance: $
-                  {usdBalances[selectedToken]?.toFixed(2) || "0.00"} USD
+                  {typeof backendUser?.balance === "number"
+                    ? backendUser.balance.toFixed(2)
+                    : "0.00"}{" "}
+                  USD
                 </p>
                 <p>
-                  Network:{" "}
-                  {selectedToken === "BTC"
-                    ? "Bitcoin Network"
-                    : "Ethereum Mainnet"}
+                  Network: {getNetworkName(selectedToken)}
                 </p>
                 <div className={styles.receivingAddress}>
                   <label>Receiving Address:</label>
@@ -1069,7 +1270,7 @@ export default function PortfolioApp() {
                   <strong>Token:</strong> {selectedToken}
                 </p>
                 <p>
-                  <strong>Wallet Address:</strong> {walletAddress}
+                  <strong>Wallet Address:</strong> {rkAddress}
                 </p>
               </div>
             </div>
@@ -1116,15 +1317,15 @@ export default function PortfolioApp() {
             </div>
             <div className={styles.modalBody}>
               <div className={styles.inputGroup}>
-                <label>Amount ({selectedToken})</label>
+                <label>Amount (USD)</label>
                 <input
                   type="number"
                   value={withdrawAmount}
                   onChange={(e) => setWithdrawAmount(e.target.value)}
-                  placeholder="0.0"
-                  step={selectedToken === "BTC" ? "0.00000001" : "0.001"}
+                  placeholder="0.00"
+                  step="0.01"
                   min="0"
-                  max={getCurrentBalance()}
+                  max={backendUser?.balance || 0}
                   disabled={isProcessing}
                   className={styles.modalInput}
                 />
@@ -1139,6 +1340,8 @@ export default function PortfolioApp() {
                 >
                   <option value="ETH">Ethereum (ETH)</option>
                   <option value="BTC">Bitcoin (BTC)</option>
+                  <option value="BNB">Binance Coin (BNB)</option>
+                  <option value="SOL">Solana (SOL)</option>
                   <option value="USDT">Tether (USDT)</option>
                   <option value="USDC">USD Coin (USDC)</option>
                 </select>
@@ -1205,13 +1408,13 @@ export default function PortfolioApp() {
               <div className={styles.modalInfo}>
                 <p>
                   Available Balance: $
-                  {usdBalances[selectedToken]?.toFixed(2) || "0.00"} USD
+                  {typeof backendUser?.balance === "number"
+                    ? backendUser.balance.toFixed(2)
+                    : "0.00"}{" "}
+                  USD
                 </p>
                 <p>
-                  Network:{" "}
-                  {selectedToken === "BTC"
-                    ? "Bitcoin Network"
-                    : "Ethereum Mainnet"}
+                  Network: {getNetworkName(selectedToken)}
                 </p>
               </div>
             </div>
@@ -1252,16 +1455,16 @@ export default function PortfolioApp() {
 
       <section className={styles.marketSection}>
         <div className={styles.marketHeader}>
-          {/* <div>
+          <div>
             <h2>Live Crypto Market</h2>
             <p>Real-time cryptocurrency prices and trading</p>
-          </div> */}
+          </div>
           <button
             className={styles.refreshButton}
             onClick={() => window.location.reload()}
           >
             <span className={styles.refreshIcon}>↻</span>
-            {/* Refresh */}
+            Refresh
           </button>
         </div>
         {isLoading ? (
@@ -1312,11 +1515,12 @@ export default function PortfolioApp() {
                         {coin.priceChange >= 0 ? "↗ BULL" : "↘ BEAR"}
                       </span>
                     </div>
-                    {/* <Link href={`/tradepage/${coin.symbol.toLowerCase()}`}>
-                      <button className={styles.tradeButton}>
-                        Trade {coin.symbol}
-                      </button>
-                    </Link> */}
+                    <button
+                      className={styles.tradeButton}
+                      onClick={() => router.push(`/trade?symbol=${coin.symbol}`)}
+                    >
+                      Trade {coin.symbol}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1365,3 +1569,4 @@ export default function PortfolioApp() {
     </main>
   );
 }
+

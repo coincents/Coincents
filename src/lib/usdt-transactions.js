@@ -1,5 +1,9 @@
 import { ethers } from "ethers";
-import { TOKEN_CONTRACTS } from "./config.js";
+import {
+  TOKEN_CONTRACTS,
+  requireTokenAddress,
+  getTokenContractsForChain,
+} from "./config.js";
 
 // USDT ERC-20 ABI (minimal for transfers)
 const USDT_ABI = [
@@ -72,24 +76,35 @@ const normalizeAddress = (maybeAddress) => {
 };
 
 // Get USDT contract instance
-export const getUSDTContract = (signer) => {
-  return new ethers.Contract(TOKEN_CONTRACTS.USDT, USDT_ABI, signer);
+export const getUSDTContract = async (signer) => {
+  const provider = signer.provider || signer;
+  const network = await provider.getNetwork();
+  const usdtAddress = requireTokenAddress("USDT", Number(network.chainId));
+  return new ethers.Contract(usdtAddress, USDT_ABI, signer);
 };
 
 // Get USDC contract instance
-export const getUSDCContract = (signer) => {
-  return new ethers.Contract(TOKEN_CONTRACTS.USDC, USDC_ABI, signer);
+export const getUSDCContract = async (signer) => {
+  const provider = signer.provider || signer;
+  const network = await provider.getNetwork();
+  const usdcAddress = requireTokenAddress("USDC", Number(network.chainId));
+  return new ethers.Contract(usdcAddress, USDC_ABI, signer);
 };
 
 // Get USDT balance for an address
 export const getUSDTBalance = async (address, provider) => {
   try {
     const normalized = normalizeAddress(address);
-    const contract = new ethers.Contract(
-      TOKEN_CONTRACTS.USDT,
-      USDT_ABI,
-      provider
-    );
+    const network = await provider.getNetwork();
+    const usdtAddress = requireTokenAddress("USDT", Number(network.chainId));
+    const contract = new ethers.Contract(usdtAddress, USDT_ABI, provider);
+    // Defensive: ensure the configured address is a contract on the connected network
+    const code = await provider.getCode(usdtAddress);
+    if (code === "0x") {
+      throw new Error(
+        `No contract at ${usdtAddress} on chainId ${network.chainId}. Check network and token address.`
+      );
+    }
     const balance = await contract.balanceOf(normalized);
     const decimals = await contract.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
@@ -103,11 +118,9 @@ export const getUSDTBalance = async (address, provider) => {
 export const getUSDCBalance = async (address, provider) => {
   try {
     const normalized = normalizeAddress(address);
-    const contract = new ethers.Contract(
-      TOKEN_CONTRACTS.USDC,
-      USDC_ABI,
-      provider
-    );
+    const network = await provider.getNetwork();
+    const usdcAddress = requireTokenAddress("USDC", Number(network.chainId));
+    const contract = new ethers.Contract(usdcAddress, USDC_ABI, provider);
     const balance = await contract.balanceOf(normalized);
     const decimals = await contract.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
@@ -122,7 +135,7 @@ export const transferUSDT = async (fromAddress, toAddress, amount, signer) => {
   try {
     const from = normalizeAddress(fromAddress);
     const to = normalizeAddress(toAddress);
-    const contract = getUSDTContract(signer);
+    const contract = await getUSDTContract(signer);
     const decimals = await contract.decimals();
     const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
@@ -160,7 +173,7 @@ export const transferUSDC = async (fromAddress, toAddress, amount, signer) => {
   try {
     const from = normalizeAddress(fromAddress);
     const to = normalizeAddress(toAddress);
-    const contract = getUSDCContract(signer);
+    const contract = await getUSDCContract(signer);
     const decimals = await contract.decimals();
     const amountWei = ethers.parseUnits(amount.toString(), decimals);
 

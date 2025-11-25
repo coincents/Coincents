@@ -1,4 +1,3 @@
-
 "use client";
 
 import { createContext, useContext, useState, useEffect } from "react";
@@ -24,6 +23,7 @@ export const UserProvider = ({ children }) => {
   const [walletAddress, setWalletAddress] = useState("");
   const [backendUser, setBackendUser] = useState(null);
   const [isLoadingUser, setIsLoadingUser] = useState(false);
+  const [lastSyncedAddress, setLastSyncedAddress] = useState(null);
 
   // Sync wagmi connection to context and backend
   useEffect(() => {
@@ -32,12 +32,19 @@ export const UserProvider = ({ children }) => {
         setUserId("");
         setWalletAddress("");
         setBackendUser(null);
+        setLastSyncedAddress(null);
+        return;
+      }
+
+      // Skip if we already synced this address
+      if (address === lastSyncedAddress) {
         return;
       }
 
       // Normalize to checksum for UI
       const normalized = address;
       setWalletAddress(normalized);
+      setLastSyncedAddress(normalized);
 
       // Upsert user via wallet auth endpoint
       try {
@@ -64,7 +71,7 @@ export const UserProvider = ({ children }) => {
       }
     };
     sync();
-  }, [isConnected, address]);
+  }, [isConnected, address, lastSyncedAddress]);
 
   // Redirect to portfolio only from landing page, and only after full connection (not reconnecting)
   useEffect(() => {

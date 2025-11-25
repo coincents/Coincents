@@ -41,22 +41,6 @@
   color: #ffffff;
 }
 
-/* 🌈 Gradient Box Style */
-.gradientBox {
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #6a11cb, #2575fc); /* purple → blue */
-  color: #ffffff !important;
-  font-weight: 600;
-  transition: all 0.3s ease;
-}
-
-.gradientBox:hover {
-  background: linear-gradient(135deg, #2575fc, #6a11cb); /* reverse gradient */
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
 .navRight {
   display: flex;
   align-items: center;
@@ -103,19 +87,19 @@
     flex-direction: column;
     gap: 1rem;
   }
-
+  
   .navLeft {
     flex-direction: column;
     gap: 1rem;
     text-align: center;
   }
-
+  
   .nav {
     flex-wrap: wrap;
     justify-content: center;
     gap: 1rem;
   }
-
+  
   .navRight {
     flex-direction: column;
     gap: 0.5rem;

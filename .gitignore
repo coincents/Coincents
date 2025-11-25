@@ -110,3 +110,13 @@ private-keys.txt
 
 # Local Netlify folder
 .netlify
+
+# Build logs
+build.log
+
+# Backup files
+*.backup
+.env.backup
+
+# Prisma Studio
+.prisma/

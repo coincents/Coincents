@@ -8,6 +8,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const address = searchParams.get("address");
     const id = searchParams.get("id");
+    const userId = searchParams.get("userId");
 
     if (address) {
       const user = await prisma.user.findUnique({
@@ -24,9 +25,9 @@ export async function GET(request) {
       return NextResponse.json({ success: true, user });
     }
 
-    if (id) {
+    if (id || userId) {
       const user = await prisma.user.findUnique({
-        where: { id },
+        where: { id: id || userId },
         select: {
           id: true,
           email: true,
@@ -34,6 +35,7 @@ export async function GET(request) {
           ethereumAddress: true,
           btcAddress: true,
           createdAt: true,
+          role: true,
         },
       });
       return NextResponse.json({ success: true, user });

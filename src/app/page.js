@@ -36,11 +36,11 @@ export default function LandingPage() {
         <div className={styles.walletGate}>
           <div className={styles.walletGateContent}>
             <div className={styles.walletGateLogo}>
-              <div className={styles.logo}>Coincents</div>
+              <div className={styles.logo}>WalletBase</div>
             </div>
 
             <div className={styles.walletGateTitle}>
-              <h1>Welcome to Coincents</h1>
+              <h1>Welcome to WalletBase</h1>
               <p>
                 Connect your wallet to access the decentralized trading platform
               </p>

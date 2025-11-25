@@ -65,14 +65,14 @@ const deleteCookie = (name) => {
 
 // Save wallet connection to cookies
 const saveWalletConnection = (walletType, address) => {
-  setCookie("coincents_wallet_type", walletType, 7);
-  setCookie("coincents_wallet_address", address, 7);
+  setCookie("walletbase_wallet_type", walletType, 7);
+  setCookie("walletbase_wallet_address", address, 7);
 };
 
 // Load wallet connection from cookies
 const loadWalletConnection = () => {
-  const walletType = getCookie("coincents_wallet_type");
-  const address = getCookie("coincents_wallet_address");
+  const walletType = getCookie("walletbase_wallet_type");
+  const address = getCookie("walletbase_wallet_address");
 
   if (walletType && address) {
     return { walletType, address };
@@ -83,8 +83,8 @@ const loadWalletConnection = () => {
 
 // Clear wallet connection from cookies
 const clearWalletConnection = () => {
-  deleteCookie("coincents_wallet_type");
-  deleteCookie("coincents_wallet_address");
+  deleteCookie("walletbase_wallet_type");
+  deleteCookie("walletbase_wallet_address");
 };
 
 // Detect available wallets

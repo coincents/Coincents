@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useUser } from "../contexts/UserContext";
@@ -13,25 +12,19 @@ export default function Navigation() {
     <header className={styles.header}>
       <div className={styles.navLeft}>
         <Link href="/" className={styles.navLink}>
-          <div className={styles.logo}>Coincents</div>
+          <div className={styles.logo}>WalletBase</div>
         </Link>
         <nav className={styles.nav}>
-          <Link
-            href="/market"
-            className={`${styles.navLink} ${styles.gradientBox}`}
-          >
+          <Link href="/market" className={styles.navLink}>
             Market
           </Link>
-          <Link
-            href="/ai-trading"
-            className={`${styles.navLink} ${styles.gradientBox}`}
-          >
+          {/* <Link href="/orders" className={styles.navLink}>
+            Orders
+          </Link> */}
+          <Link href="/ai-trading" className={styles.navLink}>
             AI Trading
           </Link>
-          <Link
-            href="/settings"
-            className={`${styles.navLink} ${styles.gradientBox}`}
-          >
+          <Link href="/settings" className={styles.navLink}>
             Settings
           </Link>
         </nav>
