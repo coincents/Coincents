@@ -9,12 +9,17 @@ export async function GET(request) {
     const userId = searchParams.get('userId');
     const status = searchParams.get('status');
     const type = searchParams.get('type');
-    
+    const completed = searchParams.get('completed');
+
     // Build where clause based on query parameters
     const where = {};
     if (userId) where.userId = userId;
     if (status) where.status = status;
     if (type) where.type = type;
+    // Support filtering for completed trades (WON, LOST, CLOSED)
+    if (completed === 'true') {
+      where.status = { in: ['WON', 'LOST', 'CLOSED'] };
+    }
     
     const trades = await prisma.trade.findMany({
       where,

@@ -14,16 +14,11 @@ async function initPrisma() {
 
   if (poolUrl) {
     try {
-      console.log("🔌 Connecting to database (primary URL)...");
       prisma = createPrismaClient(poolUrl);
       await prisma.$connect();
-      console.log("✅ Connected using primary URL");
       return;
     } catch (e) {
-      console.error(
-        "⚠️ Primary URL connection failed. Falling back to direct URL...",
-        e?.message || e
-      );
+      // Primary URL failed, falling back to direct URL
     }
   }
 
@@ -33,10 +28,8 @@ async function initPrisma() {
     );
   }
 
-  console.log("🔌 Connecting to database (direct URL)...");
   prisma = createPrismaClient(directUrl);
   await prisma.$connect();
-  console.log("✅ Connected using direct URL");
 }
 
 if (!global.prisma) {

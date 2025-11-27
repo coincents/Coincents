@@ -40,57 +40,39 @@ export const getUTXOs = async (address) => {
 // Validate Bitcoin address format (improved validation)
 export const isValidBitcoinAddress = (address) => {
   try {
-    // Basic Bitcoin address validation
     if (!address || typeof address !== 'string') {
-      console.log('Invalid address: not a string or empty');
       return false;
     }
-    
-    // Trim whitespace
+
     const trimmedAddress = address.trim();
-    
+
     // Check for valid Bitcoin address prefixes
     const validPrefixes = ['1', '3', 'bc1'];
     const hasValidPrefix = validPrefixes.some(prefix => trimmedAddress && typeof trimmedAddress === 'string' && trimmedAddress.startsWith(prefix));
-    
+
     if (!hasValidPrefix) {
-      console.log('Invalid address: no valid prefix found', trimmedAddress);
       return false;
     }
-    
+
     // Check length (basic validation)
     if (trimmedAddress.length < 26 || trimmedAddress.length > 90) {
-      console.log('Invalid address: length out of range', trimmedAddress.length);
       return false;
     }
-    
-    // More permissive character validation
-    // Legacy addresses (P2PKH): 1 + 25-34 alphanumeric characters (excluding 0, O, I, l)
-    // P2SH addresses: 3 + 25-34 alphanumeric characters (excluding 0, O, I, l)
-    // Bech32 addresses: bc1 + 39-59 alphanumeric characters (lowercase)
-    
+
+    // Legacy and P2SH addresses
     if (trimmedAddress && typeof trimmedAddress === 'string' && (trimmedAddress.startsWith('1') || trimmedAddress.startsWith('3'))) {
-      // Legacy and P2SH addresses
       const legacyPattern = /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/;
-      const isValid = legacyPattern.test(trimmedAddress);
-      if (!isValid) {
-        console.log('Invalid legacy/P2SH address format', trimmedAddress);
-      }
-      return isValid;
-    } else if (trimmedAddress && typeof trimmedAddress === 'string' && trimmedAddress.startsWith('bc1')) {
-      // Bech32 addresses
-      const bech32Pattern = /^bc1[a-z0-9]{39,59}$/;
-      const isValid = bech32Pattern.test(trimmedAddress);
-      if (!isValid) {
-        console.log('Invalid Bech32 address format', trimmedAddress);
-      }
-      return isValid;
+      return legacyPattern.test(trimmedAddress);
     }
-    
-    console.log('Invalid address: no matching format', trimmedAddress);
+
+    // Bech32 addresses
+    if (trimmedAddress && typeof trimmedAddress === 'string' && trimmedAddress.startsWith('bc1')) {
+      const bech32Pattern = /^bc1[a-z0-9]{39,59}$/;
+      return bech32Pattern.test(trimmedAddress);
+    }
+
     return false;
   } catch (error) {
-    console.log('Validation error:', error);
     return false;
   }
 };
@@ -142,12 +124,9 @@ export const generateMockBitcoinAddress = () => {
   return address;
 };
 
-// Test Bitcoin address validation (for debugging)
+// Test Bitcoin address validation
 export const testBitcoinAddress = (address) => {
-  console.log('Testing Bitcoin address:', address);
-  const result = isValidBitcoinAddress(address);
-  console.log('Validation result:', result);
-  return result;
+  return isValidBitcoinAddress(address);
 };
 
 // More lenient validation for testing purposes

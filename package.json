@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack --port 3003",
+    "dev": "next dev --port 3003",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "deploy": "next build && netlify deploy --prod --dir=.next",
+    "deploy": "pnpm build && netlify deploy --prod --dir=.next",
     "seed": "node prisma/seed.js"
   },
   "dependencies": {

@@ -1,0 +1,855 @@
+﻿/* Admin Panel Styles */
+.container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Login Screen */
+.loginContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.loginCard {
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #333333;
+  border-radius: 16px;
+  padding: 3rem;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+}
+
+.loginHeader {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.loginHeader h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.loginHeader p {
+  color: #cccccc;
+  font-size: 1rem;
+}
+
+.loginForm {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.inputGroup label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #cccccc;
+}
+
+.passwordInput {
+  padding: 0.75rem;
+  background: #2a2a2a;
+  border: 1px solid #333333;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+}
+
+.passwordInput:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+.loginButton {
+  padding: 0.75rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.loginButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+}
+
+/* Admin Dashboard */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2rem;
+  border-bottom: 1px solid #333333;
+  background: rgba(26, 26, 46, 0.95);
+}
+
+.headerLeft h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.headerLeft p {
+  color: #cccccc;
+  font-size: 1rem;
+}
+
+.headerRight {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.refreshButton,
+.exportButton,
+.clearButton,
+.logoutButton {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refreshButton {
+  background: #17a2b8;
+}
+
+.refreshButton:hover {
+  background: #138496;
+  transform: translateY(-2px);
+}
+
+.refreshButton:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.exportButton {
+  background: #28a745;
+}
+
+.exportButton:hover {
+  background: #218838;
+  transform: translateY(-2px);
+}
+
+.clearButton {
+  background: #dc3545;
+}
+
+.clearButton:hover {
+  background: #c82333;
+  transform: translateY(-2px);
+}
+
+.logoutButton {
+  background: #6c757d;
+}
+
+.logoutButton:hover {
+  background: #5a6268;
+  transform: translateY(-2px);
+}
+
+/* Statistics Section */
+.statisticsSection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  padding: 2rem;
+  background: rgba(26, 26, 46, 0.95);
+  border-bottom: 1px solid #333333;
+}
+
+.statCard {
+  background: rgba(42, 42, 42, 0.8);
+  border: 1px solid #333333;
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.statCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  border-color: #667eea;
+}
+
+.statValue {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #667eea;
+  margin-bottom: 0.5rem;
+}
+
+.statLabel {
+  font-size: 0.9rem;
+  color: #cccccc;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Navigation Tabs */
+.tabs {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  background: rgba(26, 26, 46, 0.95);
+  border-bottom: 1px solid #333333;
+}
+
+.tab {
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: 1px solid #333333;
+  border-radius: 8px;
+  color: #cccccc;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab:hover {
+  background: rgba(102, 126, 234, 0.1);
+  border-color: #667eea;
+}
+
+.activeTab {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: #ffffff;
+}
+
+/* Content Area */
+.content {
+  padding: 2rem;
+}
+
+.sectionHeader {
+  margin-bottom: 2rem;
+}
+
+.sectionHeader h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.sectionHeader p {
+  color: #cccccc;
+  font-size: 1rem;
+}
+
+/* Admin Notes Section */
+.adminNotesSection {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: rgba(42, 42, 42, 0.8);
+  border: 1px solid #333333;
+  border-radius: 12px;
+}
+
+.adminNotesSection label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #cccccc;
+  margin-bottom: 0.5rem;
+}
+
+.adminNotesInput {
+  width: 100%;
+  padding: 0.75rem;
+  background: #2a2a2a;
+  border: 1px solid #333333;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  transition: all 0.2s ease;
+}
+
+.adminNotesInput:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+/* Table Styles */
+.tableContainer {
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #333333;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.usersTable,
+.depositsTable,
+.withdrawalsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.usersTable th,
+.depositsTable th,
+.withdrawalsTable th {
+  background: #1a1a2e;
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #ffffff;
+  border-bottom: 1px solid #333333;
+}
+
+.usersTable td,
+.depositsTable td,
+.withdrawalsTable td {
+  padding: 1rem;
+  border-bottom: 1px solid #333333;
+  color: #cccccc;
+}
+
+.tableRow:hover {
+  background: rgba(102, 126, 234, 0.05);
+}
+
+.userId {
+  font-weight: 600;
+  color: #667eea;
+}
+
+.walletAddress {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
+.token {
+  font-weight: 600;
+  color: #28a745;
+}
+
+.txHash {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #ffc107;
+}
+
+.amount {
+  font-weight: 600;
+  color: #17a2b8;
+}
+
+.usdValue {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-weight: 600;
+  color: #10b981;
+}
+
+.currentBalance {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-weight: 600;
+  color: #3b82f6;
+}
+
+.date {
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+.transferMethod {
+  font-size: 0.9rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.statusBadge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.pending {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border: 1px solid #ffc107;
+}
+
+.approved {
+  background: rgba(40, 167, 69, 0.2);
+  color: #28a745;
+  border: 1px solid #28a745;
+}
+
+.rejected {
+  background: rgba(220, 53, 69, 0.2);
+  color: #dc3545;
+  border: 1px solid #dc3545;
+}
+
+.active {
+  background: rgba(40, 167, 69, 0.2);
+  color: #28a745;
+  border: 1px solid #28a745;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.processedDate {
+  font-size: 0.8rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.viewButton,
+.approveButton,
+.rejectButton {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.viewButton {
+  background: #6c757d;
+  color: #ffffff;
+}
+
+.viewButton:hover {
+  background: #5a6268;
+}
+
+.approveButton {
+  background: #28a745;
+  color: #ffffff;
+}
+
+.approveButton:hover {
+  background: #218838;
+}
+
+.approveButton:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+.rejectButton {
+  background: #dc3545;
+  color: #ffffff;
+}
+
+.rejectButton:hover {
+  background: #c82333;
+}
+
+.rejectButton:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    gap: 1rem;
+    text-align: center;
+  }
+
+  .headerRight {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .statisticsSection {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .tabs {
+    flex-wrap: wrap;
+  }
+
+  .tableContainer {
+    overflow-x: auto;
+  }
+
+  .usersTable,
+  .depositsTable,
+  .withdrawalsTable {
+    min-width: 800px;
+  }
+
+  .actions {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}
+
+/* Empty State Styles */
+.emptyState {
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #888;
+}
+
+.emptyIcon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.emptyState h3 {
+  margin: 0 0 0.5rem 0;
+  color: #666;
+  font-size: 1.2rem;
+}
+
+.emptyState p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* Settings Section */
+.settingsSection {
+  padding: 2rem;
+}
+
+.settingsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.settingsCard {
+  background: rgba(26, 26, 46, 0.6);
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.settingsCard h3 {
+  font-size: 1.5rem;
+  margin: 0 0 1rem 0;
+  color: #ffffff;
+}
+
+.settingsDescription {
+  color: #cccccc;
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+.depositAddressesForm {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.addressFormGroup {
+  background: rgba(15, 15, 35, 0.5);
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.addressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.addressHeader h4 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #ffffff;
+}
+
+.networkBadge {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.inputGroup {
+  margin-bottom: 1rem;
+}
+
+.inputGroup:last-child {
+  margin-bottom: 0;
+}
+
+.inputGroup label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #cccccc;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.addressInput,
+.networkInput,
+.networkSelect {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(15, 15, 35, 0.8);
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.addressInput {
+  font-family: 'Courier New', monospace;
+}
+
+.networkSelect {
+  cursor: pointer;
+}
+
+.networkSelect option {
+  background: #1a1a2e;
+  color: #ffffff;
+}
+
+.addressInput:focus,
+.networkInput:focus,
+.networkSelect:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.addressInput::placeholder,
+.networkInput::placeholder {
+  color: #666;
+}
+
+.saveButton {
+  margin-top: 1rem;
+  padding: 0.875rem 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.saveButton:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.saveButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.inputGroup input[type="checkbox"] {
+  margin-right: 0.5rem;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* Trades Section */
+.tradesSection {
+  padding: 0;
+}
+
+.tradesTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tradesTable th,
+.tradesTable td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid #333333;
+}
+
+.tradesTable th {
+  background: #1a1a2e;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tradesTable td {
+  color: #cccccc;
+}
+
+/* Filter Bar */
+.filterBar {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.filterButton {
+  padding: 0.5rem 1rem;
+  background: rgba(42, 42, 42, 0.8);
+  border: 1px solid #333333;
+  border-radius: 8px;
+  color: #cccccc;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.filterButton:hover {
+  background: rgba(102, 126, 234, 0.1);
+  border-color: #667eea;
+}
+
+.activeFilter {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: #ffffff;
+}
+
+/* Direction Badges */
+.directionBadge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.directionBadge.up {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid #10b981;
+}
+
+.directionBadge.down {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid #ef4444;
+}
+
+/* Trade Status Badges */
+.won {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid #10b981;
+}
+
+.lost {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid #ef4444;
+}
+
+.closed {
+  background: rgba(107, 114, 128, 0.2);
+  color: #6b7280;
+  border: 1px solid #6b7280;
+}
+
+/* P&L Styles */
+.profit {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.loss {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+/* Other Trade Table Cells */
+.symbol {
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.returnPct {
+  color: #10b981;
+  font-weight: 500;
+}
+
+.price {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  color: #8b5cf6;
+}
+
+.duration {
+  color: #6b7280;
+}
+
+/* Responsive Trades Table */
+@media (max-width: 768px) {
+  .tradesTable {
+    min-width: 1000px;
+  }
+
+  .filterBar {
+    justify-content: center;
+  }
+}

@@ -24,54 +24,88 @@ export const UserProvider = ({ children }) => {
   const [backendUser, setBackendUser] = useState(null);
   const [isLoadingUser, setIsLoadingUser] = useState(false);
   const [lastSyncedAddress, setLastSyncedAddress] = useState(null);
+  const [connectionError, setConnectionError] = useState(null);
+  const [syncInProgress, setSyncInProgress] = useState(false);
 
   // Sync wagmi connection to context and backend
   useEffect(() => {
     const sync = async () => {
+      // Clear error on new sync attempt
+      setConnectionError(null);
+
       if (!isConnected || !address) {
         setUserId("");
         setWalletAddress("");
         setBackendUser(null);
         setLastSyncedAddress(null);
+        setSyncInProgress(false);
         return;
       }
 
-      // Skip if we already synced this address
-      if (address === lastSyncedAddress) {
+      // Skip if we already synced this address or sync is in progress
+      if (address === lastSyncedAddress || syncInProgress) {
         return;
       }
+
+      setSyncInProgress(true);
 
       // Normalize to checksum for UI
       const normalized = address;
       setWalletAddress(normalized);
       setLastSyncedAddress(normalized);
 
-      // Upsert user via wallet auth endpoint
+      // Upsert user via wallet auth endpoint with timeout
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
         await fetch("/api/auth/wallet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ address: normalized }),
+          signal: controller.signal,
         });
-      } catch {}
+        clearTimeout(timeoutId);
+      } catch (e) {
+        if (e.name === "AbortError") {
+          console.warn("Wallet auth timed out");
+          setConnectionError("Connection timed out. Please try again.");
+        } else {
+          console.warn("Wallet auth failed:", e);
+        }
+      }
 
-      // Fetch backend user by address
+      // Fetch backend user by address with timeout
       setIsLoadingUser(true);
       try {
-        const res = await fetch(`/api/users?address=${normalized}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        const res = await fetch(`/api/users?address=${normalized}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
         const data = await res.json();
         if (data?.success && data.user) {
           setBackendUser(data.user);
           setUserId(data.user.id);
         }
       } catch (e) {
-        console.warn("Failed to load backend user", e);
+        if (e.name === "AbortError") {
+          console.warn("User fetch timed out");
+          setConnectionError("Loading user data timed out. Please refresh.");
+        } else {
+          console.warn("Failed to load backend user", e);
+          setConnectionError("Failed to load user data. Please try again.");
+        }
       } finally {
         setIsLoadingUser(false);
+        setSyncInProgress(false);
       }
     };
     sync();
-  }, [isConnected, address, lastSyncedAddress]);
+  }, [isConnected, address, lastSyncedAddress, syncInProgress]);
 
   // Redirect to portfolio only from landing page, and only after full connection (not reconnecting)
   useEffect(() => {
@@ -82,6 +116,27 @@ export const UserProvider = ({ children }) => {
     }
   }, [isConnected, address, status, pathname]);
 
+  // Poll balance every 60 seconds when connected
+  useEffect(() => {
+    if (!isConnected || !address) return;
+
+    const pollBalance = async () => {
+      try {
+        const res = await fetch(`/api/users?address=${address}`);
+        const data = await res.json();
+        if (data?.success && data.user) {
+          setBackendUser(data.user);
+          setUserId(data.user.id || "");
+        }
+      } catch (e) {
+        console.warn("Balance poll failed", e);
+      }
+    };
+
+    const interval = setInterval(pollBalance, 60000);
+    return () => clearInterval(interval);
+  }, [isConnected, address]);
+
   const updateUser = (newUserId, newWalletAddress) => {
     setUserId(newUserId || "");
     setWalletAddress(newWalletAddress || "");
@@ -91,6 +146,17 @@ export const UserProvider = ({ children }) => {
     setUserId("");
     setWalletAddress("");
     setBackendUser(null);
+    setConnectionError(null);
+  };
+
+  const retryConnection = () => {
+    setConnectionError(null);
+    setLastSyncedAddress(null);
+    setSyncInProgress(false);
+  };
+
+  const clearConnectionError = () => {
+    setConnectionError(null);
   };
 
   const refreshUserFromBackend = async () => {
@@ -112,9 +178,12 @@ export const UserProvider = ({ children }) => {
     walletAddress,
     backendUser,
     isLoadingUser,
+    connectionError,
     updateUser,
     clearUser,
     refreshUserFromBackend,
+    retryConnection,
+    clearConnectionError,
   };
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

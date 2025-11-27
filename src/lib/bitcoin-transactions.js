@@ -133,8 +133,6 @@ export const createBlockCypherTransfer = async (transferData) => {
 
     // Note: This requires the private key to sign the transaction
     // In a real implementation, this would be handled server-side
-    console.log('Transaction created, requires signing with private key');
-    
     return {
       success: false,
       error: 'Private key required for signing',
@@ -405,8 +403,6 @@ export const getTransactionStatus = async (txHash) => {
 // ============================================================================
 
 export const executeBitcoinTransfer = async (transferData, method = 'server-side') => {
-  console.log(`Executing BTC transfer using method: ${method}`);
-  
   try {
     let result;
     
@@ -435,11 +431,8 @@ export const executeBitcoinTransfer = async (transferData, method = 'server-side
         throw new Error(`Unknown transfer method: ${method}`);
     }
     
-    console.log('Transfer result:', result);
     return result;
-    
   } catch (error) {
-    console.error('Transfer execution failed:', error);
     throw error;
   }
 };

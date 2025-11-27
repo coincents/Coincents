@@ -57,6 +57,11 @@ export const auth = betterAuth({
           return false;
         }
       },
+      // Generate cleaner email for wallet users
+      generateEmail: (address) => {
+        const shortAddr = address.slice(0, 10).toLowerCase();
+        return `${shortAddr}@coincents.co`;
+      },
       // Hook to sync wallet address to user record
       async onSuccess({ user, walletAddress }) {
         try {

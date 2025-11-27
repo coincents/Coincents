@@ -96,21 +96,29 @@ export const getUSDTBalance = async (address, provider) => {
   try {
     const normalized = normalizeAddress(address);
     const network = await provider.getNetwork();
-    const usdtAddress = requireTokenAddress("USDT", Number(network.chainId));
+    const chainId = Number(network.chainId);
+    const contracts = getTokenContractsForChain(chainId);
+    const usdtAddress = contracts.USDT;
+
+    // Return 0 for unsupported chains instead of throwing
+    if (!usdtAddress) {
+      console.warn(`USDT not configured for chainId ${chainId}, returning 0`);
+      return 0;
+    }
+
     const contract = new ethers.Contract(usdtAddress, USDT_ABI, provider);
     // Defensive: ensure the configured address is a contract on the connected network
     const code = await provider.getCode(usdtAddress);
     if (code === "0x") {
-      throw new Error(
-        `No contract at ${usdtAddress} on chainId ${network.chainId}. Check network and token address.`
-      );
+      console.warn(`No contract at ${usdtAddress} on chainId ${chainId}`);
+      return 0;
     }
     const balance = await contract.balanceOf(normalized);
     const decimals = await contract.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
   } catch (error) {
     console.error("Error fetching USDT balance:", error);
-    throw new Error("Failed to fetch USDT balance");
+    return 0; // Return 0 instead of throwing to prevent UI crashes
   }
 };
 
@@ -119,14 +127,23 @@ export const getUSDCBalance = async (address, provider) => {
   try {
     const normalized = normalizeAddress(address);
     const network = await provider.getNetwork();
-    const usdcAddress = requireTokenAddress("USDC", Number(network.chainId));
+    const chainId = Number(network.chainId);
+    const contracts = getTokenContractsForChain(chainId);
+    const usdcAddress = contracts.USDC;
+
+    // Return 0 for unsupported chains instead of throwing
+    if (!usdcAddress) {
+      console.warn(`USDC not configured for chainId ${chainId}, returning 0`);
+      return 0;
+    }
+
     const contract = new ethers.Contract(usdcAddress, USDC_ABI, provider);
     const balance = await contract.balanceOf(normalized);
     const decimals = await contract.decimals();
     return parseFloat(ethers.formatUnits(balance, decimals));
   } catch (error) {
     console.error("Error fetching USDC balance:", error);
-    throw new Error("Failed to fetch USDC balance");
+    return 0; // Return 0 instead of throwing to prevent UI crashes
   }
 };
 
