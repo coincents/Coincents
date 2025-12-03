@@ -1,6 +1,12 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import { useAccount } from "wagmi";
 import { useRouter, usePathname } from "next/navigation";
 
@@ -159,7 +165,7 @@ export const UserProvider = ({ children }) => {
     setConnectionError(null);
   };
 
-  const refreshUserFromBackend = async () => {
+  const refreshUserFromBackend = useCallback(async () => {
     if (!address) return null;
     try {
       const res = await fetch(`/api/users?address=${address}`);
@@ -169,9 +175,11 @@ export const UserProvider = ({ children }) => {
         setUserId(data.user.id || "");
         return data.user;
       }
-    } catch {}
+    } catch (error) {
+      console.warn("Manual user refresh failed", error);
+    }
     return null;
-  };
+  }, [address]);
 
   const value = {
     userId,

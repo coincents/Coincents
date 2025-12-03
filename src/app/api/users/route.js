@@ -11,8 +11,24 @@ export async function GET(request) {
     const userId = searchParams.get("userId");
 
     if (address) {
-      const user = await prisma.user.findUnique({
-        where: { ethereumAddress: address.toLowerCase() },
+      const normalized = address.toLowerCase();
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            {
+              ethereumAddress: {
+                equals: normalized,
+                mode: "insensitive",
+              },
+            },
+            {
+              email: {
+                startsWith: normalized,
+                mode: "insensitive",
+              },
+            },
+          ],
+        },
         select: {
           id: true,
           email: true,

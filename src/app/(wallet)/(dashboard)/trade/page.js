@@ -1,10 +1,9 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import styles from "./trade.module.css";
 import { useUser } from "@/contexts/UserContext";
-import { useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCandles } from "./useCandles";
 import ApexCharts from "apexcharts";
@@ -32,7 +31,8 @@ const mergeTrades = (incoming = [], existing = []) => {
 };
 
 export default function TradePage({ params = {} }) {
-  const { userId, refreshUserFromBackend, backendUser } = useUser();
+  const { userId, walletAddress, refreshUserFromBackend, backendUser } =
+    useUser();
   const searchParams = useSearchParams();
   const querySymbol = searchParams?.get("symbol");
   const symbol = (params?.symbol || querySymbol || "BTC").toUpperCase();
@@ -123,6 +123,12 @@ export default function TradePage({ params = {} }) {
       console.error("Failed to fetch trades:", error);
     }
   }, [userId]);
+
+  useEffect(() => {
+    if (walletAddress && refreshUserFromBackend) {
+      refreshUserFromBackend();
+    }
+  }, [walletAddress, refreshUserFromBackend]);
 
   useEffect(() => {
     latestSeriesRef.current = candleSeries;
