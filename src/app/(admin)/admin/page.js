@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import styles from "./admin.module.css";
 import { authClient } from "@/lib/auth-client";
 
+const defaultBalanceModalState = {
+  open: false,
+  user: null,
+  mode: "set",
+  amount: "",
+};
+
 export default function AdminPage() {
   const router = useRouter();
   const [session, setSession] = useState(null);
@@ -30,6 +37,11 @@ export default function AdminPage() {
     pendingWithdrawals: 0,
   });
   const [adminNotes, setAdminNotes] = useState("");
+  const [balanceModal, setBalanceModal] = useState(() => ({
+    ...defaultBalanceModalState,
+  }));
+  const [balanceError, setBalanceError] = useState("");
+  const [balanceSaving, setBalanceSaving] = useState(false);
 
   // Check authentication on mount
   useEffect(() => {
@@ -140,6 +152,64 @@ export default function AdminPage() {
         pendingDeposits: 0,
         pendingWithdrawals: 0,
       });
+    }
+  };
+
+  const openBalanceModal = (user) => {
+    setBalanceError("");
+    setBalanceSaving(false);
+    setBalanceModal({
+      open: true,
+      user,
+      mode: "set",
+      amount:
+        typeof user?.balance === "number"
+          ? user.balance.toFixed(2)
+          : "",
+    });
+  };
+
+  const closeBalanceModal = () => {
+    setBalanceModal({ ...defaultBalanceModalState });
+    setBalanceError("");
+    setBalanceSaving(false);
+  };
+
+  const submitBalanceUpdate = async () => {
+    if (!balanceModal.user?.id) return;
+    const value = Number(balanceModal.amount);
+    if (!Number.isFinite(value)) {
+      setBalanceError("Enter a valid numeric amount.");
+      return;
+    }
+
+    setBalanceSaving(true);
+    setBalanceError("");
+
+    try {
+      const res = await fetch(
+        `/api/admin/users/${balanceModal.user.id}/balance`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: balanceModal.mode === "delta" ? "delta" : "set",
+            amount: value,
+          }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Failed to update balance");
+      }
+      alert("Balance updated successfully.");
+      closeBalanceModal();
+      await loadAdminData();
+    } catch (error) {
+      setBalanceError(error.message || "Failed to update balance.");
+    } finally {
+      setBalanceSaving(false);
     }
   };
 
@@ -394,7 +464,8 @@ export default function AdminPage() {
 
   // Admin dashboard
   return (
-    <main className={styles.container}>
+    <>
+      <main className={styles.container}>
       {/* Header */}
       <header className={styles.header}>
         <div className={styles.headerLeft}>
@@ -558,6 +629,7 @@ export default function AdminPage() {
                       <th>Current Balance (USD)</th>
                       <th>Last Activity</th>
                       <th>Status</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -612,6 +684,14 @@ export default function AdminPage() {
                           >
                             Active
                           </span>
+                        </td>
+                        <td className={styles.actions}>
+                          <button
+                            className={styles.editButton}
+                            onClick={() => openBalanceModal(user)}
+                          >
+                            Adjust Balance
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1065,6 +1145,101 @@ export default function AdminPage() {
           </section>
         )}
       </div>
-    </main>
+      </main>
+
+      {balanceModal.open && (
+        <div
+          className={styles.balanceModalOverlay}
+          onClick={closeBalanceModal}
+        >
+          <div
+            className={styles.balanceModal}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={styles.modalTitle}>Adjust Balance</h3>
+            <p className={styles.modalSubtitle}>
+              {balanceModal.user?.email ||
+                balanceModal.user?.ethereumAddress ||
+                balanceModal.user?.id}
+            </p>
+
+            <div className={styles.modalRow}>
+              <label>Mode</label>
+              <div className={styles.modeToggleGroup}>
+                <button
+                  type="button"
+                  className={`${styles.modeToggle} ${
+                    balanceModal.mode === "set" ? styles.modeToggleActive : ""
+                  }`}
+                  onClick={() =>
+                    setBalanceModal((prev) => ({ ...prev, mode: "set" }))
+                  }
+                  disabled={balanceSaving}
+                >
+                  Set exact balance
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.modeToggle} ${
+                    balanceModal.mode === "delta" ? styles.modeToggleActive : ""
+                  }`}
+                  onClick={() =>
+                    setBalanceModal((prev) => ({ ...prev, mode: "delta" }))
+                  }
+                  disabled={balanceSaving}
+                >
+                  Adjust by amount
+                </button>
+              </div>
+            </div>
+
+            <div className={styles.modalRow}>
+              <label>
+                {balanceModal.mode === "delta"
+                  ? "Adjustment Amount (use negative to subtract)"
+                  : "New Balance"}
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={balanceModal.amount}
+                onChange={(e) =>
+                  setBalanceModal((prev) => ({
+                    ...prev,
+                    amount: e.target.value,
+                  }))
+                }
+                className={styles.balanceInput}
+                placeholder="0.00"
+                disabled={balanceSaving}
+              />
+            </div>
+
+            {balanceError && (
+              <p className={styles.errorText}>{balanceError}</p>
+            )}
+
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.modalSecondaryButton}
+                onClick={closeBalanceModal}
+                disabled={balanceSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.modalPrimaryButton}
+                onClick={submitBalanceUpdate}
+                disabled={balanceSaving}
+              >
+                {balanceSaving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

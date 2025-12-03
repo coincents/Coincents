@@ -230,6 +230,17 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+.balanceHelper {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+.balanceHelperError {
+  color: #f97316;
+  font-weight: 600;
+}
+
 .returnDisplay {
   padding: 0.75rem;
   border-radius: 8px;

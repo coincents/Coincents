@@ -500,6 +500,23 @@
   cursor: not-allowed;
 }
 
+.editButton {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #f59e0b;
+  color: #0f0f23;
+}
+
+.editButton:hover {
+  background: #d97706;
+  color: #ffffff;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .header {
@@ -852,4 +869,136 @@
   .filterBar {
     justify-content: center;
   }
+}
+
+.balanceModalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 1200;
+}
+
+.balanceModal {
+  width: min(420px, 100%);
+  background: #0f1022;
+  border: 1px solid #2d2f48;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+
+.modalTitle {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.5rem;
+  color: #ffffff;
+}
+
+.modalSubtitle {
+  margin: 0 0 1.5rem 0;
+  color: #9ca3af;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.modalRow {
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.modeToggleGroup {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.modeToggle {
+  flex: 1;
+  min-width: 150px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #33364f;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d1d5db;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modeToggleActive {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: #ffffff;
+  box-shadow: 0 10px 30px rgba(102, 126, 234, 0.35);
+}
+
+.balanceInput {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid #30324a;
+  background: rgba(20, 22, 45, 0.9);
+  color: #ffffff;
+  font-size: 1rem;
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Roboto Mono", monospace;
+}
+
+.balanceInput:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+.errorText {
+  color: #f87171;
+  font-size: 0.9rem;
+  margin: -0.5rem 0 1rem 0;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.modalSecondaryButton,
+.modalPrimaryButton {
+  padding: 0.65rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modalSecondaryButton {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+}
+
+.modalSecondaryButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.modalPrimaryButton {
+  background: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
+  color: #051937;
+  box-shadow: 0 12px 35px rgba(56, 189, 248, 0.35);
+}
+
+.modalPrimaryButton:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.modalSecondaryButton:disabled,
+.modalPrimaryButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }

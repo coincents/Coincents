@@ -12,15 +12,34 @@ import ApexCharts from "apexcharts";
 // Dynamic import to avoid SSR issues with ApexCharts
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
+const sortTrades = (list = []) => {
+  return [...list].sort((a, b) => {
+    const aTime = new Date(a?.createdAt || a?.priceOpenAt || 0).getTime();
+    const bTime = new Date(b?.createdAt || b?.priceOpenAt || 0).getTime();
+    return bTime - aTime;
+  });
+};
+
+const mergeTrades = (incoming = [], existing = []) => {
+  const normalizedIncoming = sortTrades(incoming);
+  const incomingMap = new Map(
+    normalizedIncoming.map((trade) => [trade.id, trade])
+  );
+  const optimisticCarry = existing.filter(
+    (trade) => trade.__optimistic && !incomingMap.has(trade.id)
+  );
+  return sortTrades([...normalizedIncoming, ...optimisticCarry]);
+};
+
 export default function TradePage({ params = {} }) {
-  const { userId, refreshUserFromBackend } = useUser();
+  const { userId, refreshUserFromBackend, backendUser } = useUser();
   const searchParams = useSearchParams();
   const querySymbol = searchParams?.get("symbol");
   const symbol = (params?.symbol || querySymbol || "BTC").toUpperCase();
   const [series, setSeries] = useState([]);
   const [price, setPrice] = useState(null);
   const [interval, setIntervalState] = useState("1m");
-  const [amount, setAmount] = useState(50);
+  const [amountInput, setAmountInput] = useState("50");
   const [timeframe, setTimeframe] = useState(60);
   const [expectedReturn, setExpectedReturn] = useState(10);
   const [isConnected, setIsConnected] = useState(false);
@@ -45,6 +64,65 @@ export default function TradePage({ params = {} }) {
   const viewRangeRef = useRef({ min: null, max: null });
   const latestSeriesRef = useRef([]);
   const updateTimerRef = useRef(null);
+  const latestFetchRef = useRef(0);
+
+  const parsedAmount = useMemo(() => {
+    const value = parseFloat(amountInput);
+    if (!Number.isFinite(value)) return 0;
+    return value;
+  }, [amountInput]);
+  const isAmountValid = parsedAmount > 0;
+  const availableBalance =
+    typeof backendUser?.balance === "number" ? backendUser.balance : null;
+  const exceedsBalance =
+    availableBalance !== null && isAmountValid && parsedAmount > availableBalance;
+  const formattedAmountForDisplay = useMemo(() => {
+    if (isAmountValid) {
+      return parsedAmount.toFixed(2);
+    }
+    if (!amountInput || amountInput === ".") {
+      return "0.00";
+    }
+    return amountInput;
+  }, [amountInput, isAmountValid, parsedAmount]);
+  const loadTrades = useCallback(async () => {
+    if (!userId) return;
+    const fetchId = ++latestFetchRef.current;
+    try {
+      const [activeRes, historyRes] = await Promise.all([
+        fetch(`/api/trades?userId=${userId}&status=PENDING`, {
+          cache: "no-store",
+          credentials: "include",
+        }),
+        fetch(`/api/trades?userId=${userId}&completed=true`, {
+          cache: "no-store",
+          credentials: "include",
+        }),
+      ]);
+
+      const [activeData, historyData] = await Promise.all([
+        activeRes.json(),
+        historyRes.json(),
+      ]);
+
+      if (fetchId !== latestFetchRef.current) {
+        return;
+      }
+
+      if (activeRes.ok && activeData?.success) {
+        setActiveTrades((prev) =>
+          mergeTrades(activeData.trades || [], prev)
+        );
+      }
+      if (historyRes.ok && historyData?.success) {
+        setCompletedTrades((prev) =>
+          mergeTrades(historyData.trades || [], prev)
+        );
+      }
+    } catch (error) {
+      console.error("Failed to fetch trades:", error);
+    }
+  }, [userId]);
 
   useEffect(() => {
     latestSeriesRef.current = candleSeries;
@@ -84,8 +162,8 @@ export default function TradePage({ params = {} }) {
   // Calculate expected return when amount or timeframe changes
   useEffect(() => {
     const pct = getReturnPercentage(timeframe) / 100;
-    setExpectedReturn(amount * pct);
-  }, [amount, timeframe]);
+    setExpectedReturn(isAmountValid ? parsedAmount * pct : 0);
+  }, [parsedAmount, timeframe, isAmountValid]);
 
   const getReturnPercentage = (tf) => {
     if (tf <= 60) return 20;
@@ -196,6 +274,16 @@ export default function TradePage({ params = {} }) {
   );
 
   const intervals = ["1m", "5m", "15m", "30m", "1h", "1d"];
+  const handleAmountInputChange = (value) => {
+    if (value === "") {
+      setAmountInput("");
+      return;
+    }
+    const sanitized = value.replace(/,/g, "");
+    if (/^\d*(\.\d{0,2})?$/.test(sanitized)) {
+      setAmountInput(sanitized);
+    }
+  };
 
   // Show confirmation modal instead of immediate trade
   const handleTradeClick = (direction) => {
@@ -203,8 +291,12 @@ export default function TradePage({ params = {} }) {
       alert("Please connect your wallet to place a trade.");
       return;
     }
-    if (!amount || amount <= 0) {
+    if (!isAmountValid) {
       alert("Please enter a valid amount.");
+      return;
+    }
+    if (exceedsBalance) {
+      alert("Insufficient balance for this trade.");
       return;
     }
     setPendingDirection(direction);
@@ -215,6 +307,27 @@ export default function TradePage({ params = {} }) {
   const confirmTrade = async () => {
     setShowConfirmModal(false);
     if (!pendingDirection) return;
+    if (!isAmountValid) return;
+    if (exceedsBalance) {
+      alert("Insufficient balance for this trade.");
+      setPendingDirection(null);
+      return;
+    }
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticTrade = {
+      id: tempId,
+      coin: symbol,
+      type: pendingDirection.toUpperCase(),
+      amount: parsedAmount,
+      timeframe: Number(timeframe),
+      status: "PENDING",
+      priceOpen: price ?? null,
+      priceOpenAt: new Date().toISOString(),
+      __optimistic: true,
+    };
+
+    setActiveTrades((prev) => mergeTrades([optimisticTrade], prev));
 
     try {
       const res = await fetch("/api/trades/create", {
@@ -223,23 +336,33 @@ export default function TradePage({ params = {} }) {
         body: JSON.stringify({
           coin: symbol,
           type: pendingDirection.toUpperCase(),
-          amount: Number(amount),
+          amount: parsedAmount,
           timeframe: Number(timeframe),
         }),
       });
       const data = await res.json();
       if (!data.success) {
+        setActiveTrades((prev) =>
+          prev.filter((trade) => trade.id !== tempId)
+        );
         alert(data.error || "Failed to create trade");
         return;
       }
       const newTrade = data.trade;
-      setActiveTrades((prev) => [newTrade, ...prev]);
+      setActiveTrades((prev) => {
+        const withoutTemp = prev.filter((trade) => trade.id !== tempId);
+        return mergeTrades([newTrade], withoutTemp);
+      });
+      loadTrades();
       // Refresh user balance after trade
       if (refreshUserFromBackend) {
         refreshUserFromBackend();
       }
     } catch (e) {
       console.error("Create trade failed:", e);
+      setActiveTrades((prev) =>
+        prev.filter((trade) => trade.id !== tempId)
+      );
       alert("Trade failed. Please try again.");
     }
     setPendingDirection(null);
@@ -279,39 +402,11 @@ export default function TradePage({ params = {} }) {
 
   // Load trades with auto-refresh every 10 seconds
   useEffect(() => {
-    let cancelled = false;
-
-    const fetchTrades = async () => {
-      if (!userId) return;
-      try {
-        // Fetch active trades
-        const activeRes = await fetch(`/api/trades?userId=${userId}&status=PENDING`);
-        const activeData = await activeRes.json();
-        if (cancelled) return;
-        if (activeData.success) {
-          setActiveTrades(activeData.trades || []);
-        }
-
-        // Fetch completed trades
-        const historyRes = await fetch(`/api/trades?userId=${userId}&completed=true`);
-        const historyData = await historyRes.json();
-        if (cancelled) return;
-        if (historyData.success) {
-          setCompletedTrades(historyData.trades || []);
-        }
-      } catch (e) {
-        console.error("Failed to fetch trades:", e);
-      }
-    };
-
-    fetchTrades();
-    const interval = setInterval(fetchTrades, 10000); // Auto-refresh every 10 seconds
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [userId]);
+    if (!userId) return;
+    loadTrades();
+    const intervalId = setInterval(loadTrades, 10000);
+    return () => clearInterval(intervalId);
+  }, [userId, loadTrades]);
 
   return (
     <div className={styles.container}>
@@ -400,13 +495,23 @@ export default function TradePage({ params = {} }) {
         <div className={styles.inputGroup}>
           <label className={styles.label}>Amount ($)</label>
           <input
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value))}
+            type="text"
+            inputMode="decimal"
+            value={amountInput}
+            onChange={(e) => handleAmountInputChange(e.target.value)}
             className={styles.input}
-            min="1"
-            step="1"
+            placeholder="Enter amount"
           />
+          {availableBalance !== null && (
+            <p
+              className={`${styles.balanceHelper} ${
+                exceedsBalance ? styles.balanceHelperError : ""
+              }`}
+            >
+              Available: ${availableBalance.toFixed(2)}
+              {exceedsBalance && " — insufficient balance"}
+            </p>
+          )}
         </div>
 
         {/* Expected Return */}
@@ -422,7 +527,7 @@ export default function TradePage({ params = {} }) {
           <button
             className={`${styles.tradeButton} ${styles.downButton}`}
             onClick={() => handleTradeClick("down")}
-            disabled={!price || !isConnected}
+            disabled={!price || !isConnected || !isAmountValid || exceedsBalance}
           >
             <span className={styles.arrow}>↓</span>
             <span>Down</span>
@@ -430,7 +535,7 @@ export default function TradePage({ params = {} }) {
           <button
             className={`${styles.tradeButton} ${styles.upButton}`}
             onClick={() => handleTradeClick("up")}
-            disabled={!price || !isConnected}
+            disabled={!price || !isConnected || !isAmountValid || exceedsBalance}
           >
             <span className={styles.arrow}>↑</span>
             <span>Up</span>
@@ -456,7 +561,7 @@ export default function TradePage({ params = {} }) {
               </div>
               <div className={styles.modalRow}>
                 <span>Amount:</span>
-                <span>${amount}</span>
+                <span>${formattedAmountForDisplay}</span>
               </div>
               <div className={styles.modalRow}>
                 <span>Duration:</span>
