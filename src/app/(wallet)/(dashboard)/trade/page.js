@@ -674,9 +674,11 @@ export default function TradePage({ params = {} }) {
                         {trade.type}
                       </span>
                       <span className={styles.tradeAmount}>${trade.amount}</span>
-                      <span className={styles.tradePrice}>
-                        ${trade.priceOpen?.toFixed(2)} → ${trade.priceClose?.toFixed(2) || "—"}
-                      </span>
+                      {trade.priceOpen !== undefined && (
+                        <span className={styles.tradePrice}>
+                          Entry ${trade.priceOpen.toFixed(2)}
+                        </span>
+                      )}
                     </div>
                     <div className={styles.tradeResult}>
                       <span className={`${styles.status} ${styles[trade.status]}`}>
