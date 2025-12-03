@@ -80,20 +80,21 @@ export async function POST(request) {
       );
     }
 
-    // Calculate return percentage based on timeframe
-    // Shorter timeframes = higher risk = higher return
-    let returnPct;
-    if (timeframe <= 60) {
-      returnPct = 85; // 85% return for 1 minute or less
-    } else if (timeframe <= 300) {
-      returnPct = 80; // 80% return for 5 minutes or less
-    } else if (timeframe <= 900) {
-      returnPct = 75; // 75% return for 15 minutes or less
-    } else if (timeframe <= 1800) {
-      returnPct = 70; // 70% return for 30 minutes or less
-    } else {
-      returnPct = 65; // 65% return for longer timeframes
-    }
+    // Calculate return percentage (mirror the client for consistency)
+    const returnPct =
+      timeframe <= 60
+        ? 20
+        : timeframe <= 120
+        ? 30
+        : timeframe <= 180
+        ? 40
+        : timeframe <= 360
+        ? 50
+        : timeframe <= 600
+        ? 60
+        : timeframe <= 1200
+        ? 70
+        : 80;
 
     // Snapshot open price
     const spot = await getSpot(coin);

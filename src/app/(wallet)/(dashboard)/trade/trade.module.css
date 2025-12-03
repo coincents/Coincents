@@ -347,8 +347,9 @@
 
 .tradeResult {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
 }
 
 .pnl {
@@ -378,8 +379,9 @@
 }
 
 .tradeItem {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
   align-items: center;
   padding: 1rem;
   background: rgba(255, 255, 255, 0.05);
@@ -389,8 +391,9 @@
 
 .tradeInfo {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .tradeSymbol {
@@ -418,12 +421,15 @@
 .tradeAmount {
   color: #888;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .tradeStatus {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  min-width: 90px;
 }
 
 .status {
@@ -588,17 +594,31 @@
     grid-template-columns: 1fr;
   }
   
+  .intervalButtons {
+    justify-content: center;
+  }
+
   .tradeButtons {
     flex-direction: column;
   }
   
   .tradeItem {
-    flex-direction: column;
-    gap: 0.5rem;
-    text-align: center;
+    grid-template-columns: 1fr;
+    text-align: left;
   }
   
-  .intervalButtons {
-    justify-content: center;
+  .tradeStatus,
+  .tradeResult {
+    align-items: flex-start;
+    min-width: auto;
+  }
+  
+  .tradeInfo {
+    width: 100%;
+  }
+  
+  .tradePrice {
+    width: 100%;
+    font-size: 0.8rem;
   }
 }
