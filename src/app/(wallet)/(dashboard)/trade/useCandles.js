@@ -3,6 +3,26 @@
 import { useEffect, useRef, useState } from "react";
 
 const MAX_POINTS = 500;
+const CANDLE_PROVIDERS = [
+  {
+    id: "binance-global",
+    label: "Binance Global",
+    buildRestUrl: (symbolPair, interval) =>
+      `https://api.binance.com/api/v3/klines?symbol=${symbolPair}&interval=${interval}&limit=${MAX_POINTS}`,
+    buildWsUrl: (streamSymbol, interval) =>
+      `wss://stream.binance.com:9443/ws/${streamSymbol}@kline_${interval}`,
+  },
+  {
+    id: "binance-us",
+    label: "Binance US",
+    buildRestUrl: (symbolPair, interval) =>
+      `https://api.binance.us/api/v3/klines?symbol=${symbolPair}&interval=${interval}&limit=${MAX_POINTS}`,
+    buildWsUrl: (streamSymbol, interval) =>
+      `wss://stream.binance.us:9443/ws/${streamSymbol}@kline_${interval}`,
+  },
+];
+
+const GEO_BLOCK_RE = /(451|403|forbidden|blocked|region|failed to fetch)/i;
 
 const buildSeriesPoint = (kline) => {
   return {
@@ -16,6 +36,29 @@ const buildSeriesPoint = (kline) => {
   };
 };
 
+const isLikelyGeoBlocked = (error) => {
+  if (!error) return false;
+  const message =
+    typeof error === "string"
+      ? error
+      : error?.message || error?.stack || String(error);
+  return GEO_BLOCK_RE.test(message);
+};
+
+const formatErrorMessage = (error) => {
+  if (!error) return "Failed to load chart data";
+  if (error.name === "AbortError") {
+    return "Chart loading timed out. Tap to retry.";
+  }
+  if (isLikelyGeoBlocked(error)) {
+    return "Live market data is blocked in your current region or VPN.";
+  }
+  return error.message || "Failed to load chart data";
+};
+
+const getSymbolPair = (symbol) => `${symbol.toUpperCase()}USDT`;
+const getStreamSymbol = (symbol) => `${symbol.toLowerCase()}usdt`;
+
 export function useCandles(symbol, interval) {
   const [series, setSeries] = useState([]);
   const [price, setPrice] = useState(null);
@@ -23,6 +66,7 @@ export function useCandles(symbol, interval) {
   const [error, setError] = useState(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [providerIndex, setProviderIndex] = useState(0);
 
   const wsRef = useRef(null);
   const abortRef = useRef(null);
@@ -31,12 +75,14 @@ export function useCandles(symbol, interval) {
 
   // Retry function exposed to consumers
   const retry = () => {
+    setProviderIndex(0);
     setRetryCount((c) => c + 1);
   };
 
   useEffect(() => {
     let cancelled = false;
     let historicalLoaded = false;
+    let failoverTriggered = false;
 
     const cleanup = () => {
       if (wsRef.current) {
@@ -57,10 +103,30 @@ export function useCandles(symbol, interval) {
       }
     };
 
+    const provider =
+      CANDLE_PROVIDERS[Math.min(providerIndex, CANDLE_PROVIDERS.length - 1)];
+    const symbolPair = getSymbolPair(symbol);
+    const streamSymbol = getStreamSymbol(symbol);
+
+    const requestProviderFailover = (context) => {
+      if (failoverTriggered) return true;
+      if (providerIndex < CANDLE_PROVIDERS.length - 1) {
+        failoverTriggered = true;
+        setReconnecting(true);
+        console.warn(
+          `[useCandles] Falling back from ${provider.label} due to ${context}.`
+        );
+        setProviderIndex((idx) =>
+          idx < CANDLE_PROVIDERS.length - 1 ? idx + 1 : idx
+        );
+        return true;
+      }
+      return false;
+    };
+
     const fetchHistorical = async () => {
       abortRef.current = new AbortController();
-      const symbolPair = `${symbol.toUpperCase()}USDT`;
-      const url = `https://api.binance.com/api/v3/klines?symbol=${symbolPair}&interval=${interval}&limit=${MAX_POINTS}`;
+      const url = provider.buildRestUrl(symbolPair, interval);
 
       // Add 8-second timeout
       const timeoutId = setTimeout(() => {
@@ -82,22 +148,22 @@ export function useCandles(symbol, interval) {
       } catch (e) {
         clearTimeout(timeoutId);
         if (cancelled) return;
+        if (isLikelyGeoBlocked(e) && requestProviderFailover("REST error")) {
+          cleanup();
+          return;
+        }
         // Only show error if WebSocket also hasn't provided data after a delay
         setTimeout(() => {
           if (!cancelled && !historicalLoaded) {
             setLoading(false);
-            if (e.name === "AbortError") {
-              setError("Chart loading timed out. Tap to retry.");
-            } else {
-              setError(e.message || "Failed to load chart data");
-            }
+            setError(formatErrorMessage(e));
           }
         }, 2000); // Give WebSocket 2 more seconds to provide data
       }
     };
 
     const openWebSocket = () => {
-      const streamUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}usdt@kline_${interval}`;
+      const streamUrl = provider.buildWsUrl(streamSymbol, interval);
       try {
         const ws = new WebSocket(streamUrl);
         wsRef.current = ws;
@@ -144,8 +210,15 @@ export function useCandles(symbol, interval) {
           } catch {}
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
           if (cancelled) return;
+          if (
+            isLikelyGeoBlocked(event?.reason || event?.code) &&
+            requestProviderFailover("WebSocket close")
+          ) {
+            cleanup();
+            return;
+          }
           setReconnecting(true);
           const delay = Math.min(backoffRef.current, 30000);
           backoffRef.current = delay * 2;
@@ -160,7 +233,7 @@ export function useCandles(symbol, interval) {
           } catch {}
         };
       } catch (e) {
-        setError("WebSocket error");
+        setError(formatErrorMessage(e));
       }
     };
 
@@ -175,7 +248,7 @@ export function useCandles(symbol, interval) {
       cancelled = true;
       cleanup();
     };
-  }, [symbol, interval, retryCount]);
+  }, [symbol, interval, retryCount, providerIndex]);
 
   return { series, price, loading, error, reconnecting, retry };
 }
