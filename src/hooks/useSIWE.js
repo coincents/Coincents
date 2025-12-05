@@ -1,7 +1,22 @@
 import { useState, useCallback } from "react";
 import { useAccount, useSignMessage } from "wagmi";
+import { getAddress } from "viem";
 import { SiweMessage } from "siwe";
 import { authClient } from "@/lib/auth-client";
+
+function mapSiweConstructionError(err) {
+  const rawMessage = err?.message || "";
+  if (rawMessage.includes("EIP-55")) {
+    return "Wallet returned an address without the required checksum. Please switch networks in your wallet or reconnect.";
+  }
+  if (rawMessage.includes("chain-id")) {
+    return "Your wallet reported an unsupported chain id. Please switch to Ethereum Mainnet and try again.";
+  }
+  if (rawMessage.includes("max line number")) {
+    return "Wallet sent an unexpectedly formatted SIWE payload. Reconnect or upgrade your wallet before trying again.";
+  }
+  return null;
+}
 
 export function useSIWE() {
   const { address, chainId } = useAccount();
@@ -19,6 +34,28 @@ export function useSIWE() {
     setError(null);
 
     try {
+      if (!authClient) {
+        throw new Error("Authentication client not initialized");
+      }
+
+      let checksumAddress;
+      try {
+        checksumAddress = getAddress(address);
+      } catch (addrErr) {
+        const addrMessage =
+          "Wallet returned an invalid address. Please reconnect and ensure you're using a standard EVM account.";
+        setError(addrMessage);
+        return { success: false, error: addrMessage };
+      }
+
+      const normalizedChainId = Number(chainId);
+      if (!Number.isInteger(normalizedChainId) || normalizedChainId <= 0) {
+        const chainMessage =
+          "Unsupported chain id from wallet. Switch to Ethereum Mainnet (chain id 1) and try again.";
+        setError(chainMessage);
+        return { success: false, error: chainMessage };
+      }
+
       // Step 1: Get nonce from Better Auth (with 15s timeout for mobile)
       const nonceController = new AbortController();
       const nonceTimeout = setTimeout(() => nonceController.abort(), 15000);
@@ -26,8 +63,8 @@ export function useSIWE() {
       let nonceData, nonceError;
       try {
         const result = await authClient.siwe.nonce({
-          walletAddress: address,
-          chainId,
+          walletAddress: checksumAddress,
+          chainId: normalizedChainId,
         });
         nonceData = result.data;
         nonceError = result.error;
@@ -47,16 +84,25 @@ export function useSIWE() {
       // Step 2: Create SIWE message with minimal required fields
       // Domain must match server config (hostname only, no port)
       const domain = window.location.hostname;
-      const message = new SiweMessage({
-        domain,
-        address,
-        uri: window.location.origin,
-        version: "1",
-        chainId: Number(chainId),
-        nonce: nonceData.nonce,
-      });
-
-      const preparedMessage = message.prepareMessage();
+      let preparedMessage;
+      try {
+        const message = new SiweMessage({
+          domain,
+          address: checksumAddress,
+          uri: window.location.origin,
+          version: "1",
+          chainId: normalizedChainId,
+          nonce: nonceData.nonce,
+        });
+        preparedMessage = message.prepareMessage();
+      } catch (messageError) {
+        const friendly = mapSiweConstructionError(messageError);
+        if (friendly) {
+          setError(friendly);
+          return { success: false, error: friendly };
+        }
+        throw messageError;
+      }
 
       // Step 3: Sign message with wallet
       const signature = await signMessageAsync({
@@ -67,8 +113,8 @@ export function useSIWE() {
       const { data: verifyData, error: verifyError } = await authClient.siwe.verify({
         message: preparedMessage,
         signature,
-        walletAddress: address,
-        chainId,
+        walletAddress: checksumAddress,
+        chainId: normalizedChainId,
       });
 
       if (verifyError || !verifyData) {
