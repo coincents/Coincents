@@ -3,7 +3,29 @@
 import { useEffect, useRef, useState } from "react";
 
 const MAX_POINTS = 500;
+const OKX_INTERVAL_MAP = {
+  "1m": "1m",
+  "5m": "5m",
+  "15m": "15m",
+  "30m": "30m",
+  "1h": "1H",
+  "1d": "1D",
+};
+
 const CANDLE_PROVIDERS = [
+  {
+    id: "okx",
+    label: "OKX",
+    buildRestUrl: (symbolPair, interval) => {
+      const okxInterval = OKX_INTERVAL_MAP[interval] || "1m";
+      const base = symbolPair.endsWith("USDT")
+        ? symbolPair.slice(0, -4)
+        : symbolPair;
+      const instId = `${base}-USDT`;
+      return `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${okxInterval}&limit=${MAX_POINTS}`;
+    },
+    buildWsUrl: () => `wss://ws.okx.com:8443/ws/v5/business`,
+  },
   {
     id: "binance-global",
     label: "Binance Global",
@@ -36,6 +58,19 @@ const buildSeriesPoint = (kline) => {
   };
 };
 
+const buildOkxSeriesPoint = (kline) => {
+  if (!Array.isArray(kline)) return null;
+  return {
+    x: new Date(Number(kline[0])),
+    y: [
+      parseFloat(kline[1]),
+      parseFloat(kline[2]),
+      parseFloat(kline[3]),
+      parseFloat(kline[4]),
+    ],
+  };
+};
+
 const isLikelyGeoBlocked = (error) => {
   if (!error) return false;
   const message =
@@ -58,6 +93,25 @@ const formatErrorMessage = (error) => {
 
 const getSymbolPair = (symbol) => `${symbol.toUpperCase()}USDT`;
 const getStreamSymbol = (symbol) => `${symbol.toLowerCase()}usdt`;
+const getOkxInstrument = (symbol) => `${symbol.toUpperCase()}-USDT`;
+const getOkxChannel = (interval) =>
+  `candle${OKX_INTERVAL_MAP[interval] || "1m"}`;
+
+const parseHistoricalData = (providerId, payload = null) => {
+  if (!payload) return [];
+  if (providerId.includes("binance")) {
+    if (!Array.isArray(payload)) return [];
+    return payload.map(buildSeriesPoint);
+  }
+  if (providerId === "okx") {
+    if (payload.code && payload.code !== "0") {
+      throw new Error(payload.msg || `OKX error ${payload.code}`);
+    }
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    return rows.map(buildOkxSeriesPoint).filter(Boolean).reverse();
+  }
+  return [];
+};
 
 export function useCandles(symbol, interval) {
   const [series, setSeries] = useState([]);
@@ -124,6 +178,32 @@ export function useCandles(symbol, interval) {
       return false;
     };
 
+    const handleIncomingPoint = (point, openTime, isFinal) => {
+      if (!point) return;
+      setPrice(point.y[3]);
+      if (!historicalLoaded) {
+        historicalLoaded = true;
+        setLoading(false);
+        setError(null);
+      }
+      setSeries((prev) => {
+        if (!prev.length) return [point];
+        const last = prev[prev.length - 1];
+        if (last.x.getTime() === openTime) {
+          const updated = [...prev];
+          updated[updated.length - 1] = point;
+          return updated;
+        }
+        if (isFinal) {
+          const next = [...prev, point];
+          if (next.length > MAX_POINTS)
+            next.splice(0, next.length - MAX_POINTS);
+          return next;
+        }
+        return prev;
+      });
+    };
+
     const fetchHistorical = async () => {
       abortRef.current = new AbortController();
       const url = provider.buildRestUrl(symbolPair, interval);
@@ -139,7 +219,7 @@ export function useCandles(symbol, interval) {
         if (!res.ok) throw new Error(`REST ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
-        const points = data.map(buildSeriesPoint);
+        const points = parseHistoricalData(provider.id, data);
         setSeries(points);
         setPrice(points.length ? points[points.length - 1].y[3] : null);
         historicalLoaded = true;
@@ -171,42 +251,60 @@ export function useCandles(symbol, interval) {
         ws.onopen = () => {
           setReconnecting(false);
           backoffRef.current = 1000;
+          if (provider.id === "okx") {
+            try {
+              ws.send(
+                JSON.stringify({
+                  op: "subscribe",
+                  args: [
+                    {
+                      channel: getOkxChannel(interval),
+                      instId: getOkxInstrument(symbol),
+                    },
+                  ],
+                })
+              );
+            } catch (err) {
+              console.warn("[useCandles] Failed to subscribe to OKX", err);
+            }
+          }
         };
 
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
+            if (provider.id === "okx") {
+              if (msg.event === "error") {
+                console.error("[useCandles] OKX WS error:", msg);
+                setError(msg.msg || "Market feed error");
+                return;
+              }
+              const rows = Array.isArray(msg?.data) ? msg.data : [];
+              rows.forEach((entry) => {
+                const point = buildOkxSeriesPoint(entry);
+                const openTime = Number(entry?.[0]);
+                const isFinal = entry?.[8] === "1";
+                if (point && Number.isFinite(openTime)) {
+                  handleIncomingPoint(point, openTime, isFinal);
+                }
+              });
+              return;
+            }
+
             const k = msg.k;
             if (!k) return;
             const openTime = k.t;
             const isFinal = k.x;
             const point = {
               x: new Date(openTime),
-              y: [parseFloat(k.o), parseFloat(k.h), parseFloat(k.l), parseFloat(k.c)],
+              y: [
+                parseFloat(k.o),
+                parseFloat(k.h),
+                parseFloat(k.l),
+                parseFloat(k.c),
+              ],
             };
-            setPrice(point.y[3]);
-            // If we get WebSocket data, we can show something (even without historical)
-            if (!historicalLoaded) {
-              historicalLoaded = true;
-              setLoading(false);
-              setError(null);
-            }
-            setSeries((prev) => {
-              if (!prev.length) return [point];
-              const last = prev[prev.length - 1];
-              if (last.x.getTime() === openTime) {
-                // replace in-progress candle
-                const updated = [...prev];
-                updated[updated.length - 1] = point;
-                return updated;
-              }
-              if (isFinal) {
-                const next = [...prev, point];
-                if (next.length > MAX_POINTS) next.splice(0, next.length - MAX_POINTS);
-                return next;
-              }
-              return prev;
-            });
+            handleIncomingPoint(point, openTime, isFinal);
           } catch {}
         };
 
@@ -252,5 +350,3 @@ export function useCandles(symbol, interval) {
 
   return { series, price, loading, error, reconnecting, retry };
 }
-
-
