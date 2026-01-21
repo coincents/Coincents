@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./admin.module.css";
 import { authClient } from "@/lib/auth-client";
+import { getCurrentPrices } from "@/lib/price-converter";
 
 const defaultBalanceModalState = {
   open: false,
@@ -15,7 +16,9 @@ const defaultBalanceModalState = {
 export default function AdminPage() {
   const router = useRouter();
   const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [users, setUsers] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
@@ -31,6 +34,7 @@ export default function AdminPage() {
     totalDeposits: 0,
     totalWithdrawals: 0,
     totalDepositsUSD: 0,
+    totalDepositedAllUSD: 0,
     totalWithdrawalsUSD: 0,
     totalCurrentBalanceUSD: 0,
     pendingDeposits: 0,
@@ -42,6 +46,7 @@ export default function AdminPage() {
   }));
   const [balanceError, setBalanceError] = useState("");
   const [balanceSaving, setBalanceSaving] = useState(false);
+  const isBusy = actionLoading || isRefreshing;
 
   // Check authentication on mount
   useEffect(() => {
@@ -50,13 +55,15 @@ export default function AdminPage() {
         const { data } = await authClient.getSession();
         if (data?.user) {
           setSession(data);
-          setLoading(false);
+          setIsAuthLoading(false);
         } else {
           router.push("/admin/sign-in");
         }
       } catch (error) {
         console.error("Auth check failed:", error);
         router.push("/admin/sign-in");
+      } finally {
+        setIsAuthLoading(false);
       }
     };
     checkAuth();
@@ -80,12 +87,20 @@ export default function AdminPage() {
   const loadAdminData = async () => {
     try {
       // Fetch all data in parallel (with credentials to send session cookies)
-      const [usersRes, withdrawalsRes, depositAddressesRes, depositsRes, tradesRes] = await Promise.all([
+      const [
+        usersRes,
+        withdrawalsRes,
+        depositAddressesRes,
+        depositsRes,
+        tradesRes,
+        transactionsRes,
+      ] = await Promise.all([
         fetch("/api/users", { credentials: "include" }),
         fetch("/api/withdraw/requests", { credentials: "include" }),
         fetch("/api/deposit-addresses/", { credentials: "include" }),
         fetch("/api/deposits/", { credentials: "include" }),
         fetch("/api/admin/trades", { credentials: "include" }),
+        fetch("/api/transactions", { credentials: "include" }),
       ]);
 
       const usersData = await usersRes.json();
@@ -93,6 +108,7 @@ export default function AdminPage() {
       const depositAddressesData = await depositAddressesRes.json();
       const depositsData = await depositsRes.json();
       const tradesData = await tradesRes.json();
+      const transactionsData = await transactionsRes.json();
 
       const fetchedUsers = usersData.users || [];
       const fetchedWithdrawals = withdrawalsData.withdrawRequests || [];
@@ -100,6 +116,7 @@ export default function AdminPage() {
       const fetchedDeposits = depositsData.deposits || [];
       const fetchedTrades = tradesData.trades || [];
       const fetchedTradeStats = tradesData.stats || { total: 0, pending: 0, won: 0, lost: 0, closed: 0 };
+      const fetchedTransactions = transactionsData.transactions || [];
 
       setUsers(fetchedUsers);
       setWithdrawals(fetchedWithdrawals);
@@ -109,14 +126,48 @@ export default function AdminPage() {
       setTradeStats(fetchedTradeStats);
 
       // Calculate statistics from user data, deposits, and withdrawals
-      const totalCurrentBalanceUSD = fetchedUsers.reduce((sum, user) => sum + (user.balance || 0), 0);
+      const totalCurrentBalanceUSD = fetchedUsers.reduce(
+        (sum, user) => sum + (user.balance || 0),
+        0
+      );
       
-      // Calculate total deposits (confirmed only)
-      const totalDepositsUSD = fetchedDeposits
-        .filter((d) => d.status === "CONFIRMED")
-        .reduce((sum, d) => sum + (d.amount || 0), 0);
-      
-      const pendingDeposits = fetchedDeposits.filter((d) => d.status === "PENDING").length;
+      const prices = await getCurrentPrices();
+      const toUSD = (amount, token) => {
+        const safeAmount = Number(amount) || 0;
+        const normalizedToken = (token || "USDT").toUpperCase();
+        const price = prices?.[normalizedToken]?.usd;
+        return price ? safeAmount * price : safeAmount;
+      };
+
+      const depositTransactions = fetchedTransactions.filter(
+        (tx) => String(tx.type || "").toLowerCase() === "deposit"
+      );
+
+      const isConfirmed = (status) =>
+        ["CONFIRMED", "COMPLETED", "APPROVED"].includes(
+          String(status || "").toUpperCase()
+        );
+      const isPending = (status) =>
+        String(status || "").toUpperCase() === "PENDING";
+
+      const confirmedDeposits = fetchedDeposits.filter((d) => isConfirmed(d.status));
+      const confirmedDepositTxs = depositTransactions.filter((tx) =>
+        isConfirmed(tx.status)
+      );
+
+      // Calculate total deposits (confirmed only) across deposits + transactions
+      const totalDepositsUSD =
+        confirmedDeposits.reduce((sum, d) => sum + toUSD(d.amount, d.token), 0) +
+        confirmedDepositTxs.reduce((sum, tx) => sum + toUSD(tx.amount, tx.token), 0);
+
+      // Total deposited (all statuses) across deposits + transactions
+      const totalDepositedAllUSD =
+        fetchedDeposits.reduce((sum, d) => sum + toUSD(d.amount, d.token), 0) +
+        depositTransactions.reduce((sum, tx) => sum + toUSD(tx.amount, tx.token), 0);
+
+      const pendingDeposits =
+        fetchedDeposits.filter((d) => isPending(d.status)).length +
+        depositTransactions.filter((tx) => isPending(tx.status)).length;
       
       // Calculate total withdrawals (approved + pending)
       const totalWithdrawalsUSD = fetchedWithdrawals
@@ -127,9 +178,10 @@ export default function AdminPage() {
 
       setStatistics({
         totalUsers: fetchedUsers.length,
-        totalDeposits: fetchedDeposits.length,
+        totalDeposits: fetchedDeposits.length + depositTransactions.length,
         totalWithdrawals: fetchedWithdrawals.length,
         totalDepositsUSD: totalDepositsUSD,
+        totalDepositedAllUSD: totalDepositedAllUSD,
         totalWithdrawalsUSD: totalWithdrawalsUSD,
         totalCurrentBalanceUSD: totalCurrentBalanceUSD,
         pendingDeposits: pendingDeposits,
@@ -147,6 +199,7 @@ export default function AdminPage() {
         totalDeposits: 0,
         totalWithdrawals: 0,
         totalDepositsUSD: 0,
+        totalDepositedAllUSD: 0,
         totalWithdrawalsUSD: 0,
         totalCurrentBalanceUSD: 0,
         pendingDeposits: 0,
@@ -203,9 +256,26 @@ export default function AdminPage() {
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || "Failed to update balance");
       }
+      const updatedUser = data?.user;
       alert("Balance updated successfully.");
+      if (updatedUser?.id) {
+        const previousUser = users.find((user) => user.id === updatedUser.id);
+        const previousBalance = previousUser?.balance ?? 0;
+        const nextBalance = updatedUser.balance ?? previousBalance;
+        const delta = nextBalance - previousBalance;
+        setUsers((prev) =>
+          prev.map((user) =>
+            user.id === updatedUser.id ? { ...user, ...updatedUser } : user
+          )
+        );
+        if (delta !== 0) {
+          setStatistics((prev) => ({
+            ...prev,
+            totalCurrentBalanceUSD: (prev.totalCurrentBalanceUSD || 0) + delta,
+          }));
+        }
+      }
       closeBalanceModal();
-      await loadAdminData();
     } catch (error) {
       setBalanceError(error.message || "Failed to update balance.");
     } finally {
@@ -242,32 +312,47 @@ export default function AdminPage() {
     }
   };
 
+  const getTradeRemainingSeconds = (trade) => {
+    const openTime = new Date(trade.priceOpenAt || trade.createdAt).getTime();
+    const endTime = openTime + trade.timeframe * 1000;
+    const remaining = Math.floor((endTime - currentTime.getTime()) / 1000);
+    return Math.max(0, remaining);
+  };
+
+  const formatCountdown = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return "00:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
   const handleApproveDeposit = async (depositId) => {
-    setLoading(true);
+    setActionLoading(true);
     try {
       alert("Deposit approval not implemented in this version.");
     } catch (error) {
       console.error("Error approving deposit:", error);
       alert("Error approving deposit");
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
   const handleRejectDeposit = async (depositId) => {
-    setLoading(true);
+    setActionLoading(true);
     try {
       alert("Deposit rejection not implemented in this version.");
     } catch (error) {
       console.error("Error rejecting deposit:", error);
       alert("Error rejecting deposit");
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
   const handleApproveWithdrawal = async (withdrawalId) => {
-    setLoading(true);
+    const existing = withdrawals.find((w) => w.id === withdrawalId);
+    setActionLoading(true);
     try {
       const res = await fetch("/api/withdraw/manage", {
         method: "PATCH",
@@ -278,7 +363,19 @@ export default function AdminPage() {
       });
       if (res.ok) {
         alert("Withdrawal approved successfully!");
-        loadAdminData();
+        setWithdrawals((prev) =>
+          prev.map((w) =>
+            w.id === withdrawalId
+              ? { ...w, status: "APPROVED", resolvedAt: new Date().toISOString() }
+              : w
+          )
+        );
+        if (existing?.status === "PENDING") {
+          setStatistics((prev) => ({
+            ...prev,
+            pendingWithdrawals: Math.max(0, (prev.pendingWithdrawals || 0) - 1),
+          }));
+        }
         setAdminNotes("");
       } else {
         const error = await res.json();
@@ -288,12 +385,13 @@ export default function AdminPage() {
       console.error("Error approving withdrawal:", error);
       alert("Error approving withdrawal");
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
   const handleRejectWithdrawal = async (withdrawalId) => {
-    setLoading(true);
+    const existing = withdrawals.find((w) => w.id === withdrawalId);
+    setActionLoading(true);
     try {
       const res = await fetch("/api/withdraw/manage", {
         method: "PATCH",
@@ -304,7 +402,22 @@ export default function AdminPage() {
       });
       if (res.ok) {
         alert("Withdrawal rejected successfully!");
-        loadAdminData();
+        setWithdrawals((prev) =>
+          prev.map((w) =>
+            w.id === withdrawalId
+              ? { ...w, status: "REJECTED", resolvedAt: new Date().toISOString() }
+              : w
+          )
+        );
+        if (existing?.status === "PENDING") {
+          const amount = Number(existing?.amount) || 0;
+          setStatistics((prev) => ({
+            ...prev,
+            pendingWithdrawals: Math.max(0, (prev.pendingWithdrawals || 0) - 1),
+            totalWithdrawalsUSD:
+              Math.max(0, (prev.totalWithdrawalsUSD || 0) - amount),
+          }));
+        }
         setAdminNotes("");
       } else {
         const error = await res.json();
@@ -314,7 +427,7 @@ export default function AdminPage() {
       console.error("Error rejecting withdrawal:", error);
       alert("Error rejecting withdrawal");
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -335,7 +448,7 @@ export default function AdminPage() {
       return;
     }
 
-    setLoading(true);
+    setActionLoading(true);
     try {
       const res = await fetch("/api/deposit-addresses/", {
         method: "PUT",
@@ -346,7 +459,6 @@ export default function AdminPage() {
       
       if (res.ok) {
         alert("✅ Deposit addresses updated successfully!");
-        loadAdminData();
       } else {
         const error = await res.json();
         let errorMessage = error.error || "Unknown error";
@@ -361,7 +473,7 @@ export default function AdminPage() {
       console.error("Error updating deposit addresses:", error);
       alert("❌ Error updating deposit addresses: " + error.message);
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -403,7 +515,10 @@ export default function AdminPage() {
   };
 
   const handleRefreshData = () => {
-    loadAdminData();
+    setIsRefreshing(true);
+    loadAdminData().finally(() => {
+      setIsRefreshing(false);
+    });
   };
 
   const handleResolveTrade = async (tradeId, result) => {
@@ -411,7 +526,8 @@ export default function AdminPage() {
       return;
     }
 
-    setLoading(true);
+    const existingTrade = trades.find((trade) => trade.id === tradeId);
+    setActionLoading(true);
     try {
       const res = await fetch(`/api/admin/trades/${tradeId}/resolve`, {
         method: "POST",
@@ -423,7 +539,64 @@ export default function AdminPage() {
       if (res.ok) {
         const data = await res.json();
         alert(data.message || `Trade resolved as ${result}`);
-        loadAdminData();
+        if (data?.scheduled) {
+          setTrades((prev) =>
+            prev.map((trade) =>
+              trade.id === tradeId
+                ? { ...trade, adminResult: result }
+                : trade
+            )
+          );
+        } else if (data?.trade) {
+          const nextStatus = data.trade.status || result;
+          setTrades((prev) =>
+            prev.map((trade) =>
+              trade.id === tradeId ? { ...trade, ...data.trade } : trade
+            )
+          );
+          if (existingTrade?.status && existingTrade.status !== nextStatus) {
+            setTradeStats((prev) => {
+              const next = { ...prev };
+              const mapKey = (status) => {
+                const key = status?.toLowerCase();
+                if (key === "pending") return "pending";
+                if (key === "won") return "won";
+                if (key === "lost") return "lost";
+                if (key === "closed") return "closed";
+                return null;
+              };
+              const fromKey = mapKey(existingTrade.status);
+              const toKey = mapKey(nextStatus);
+              if (fromKey && typeof next[fromKey] === "number") {
+                next[fromKey] = Math.max(0, next[fromKey] - 1);
+              }
+              if (toKey && typeof next[toKey] === "number") {
+                next[toKey] += 1;
+              }
+              return next;
+            });
+          }
+          if (existingTrade && result === "WON") {
+            const amount = Number(existingTrade.amount) || 0;
+            const returnPct = Number(existingTrade.returnPct) || 0;
+            const returnAmount = amount * (returnPct / 100);
+            const balanceChange = amount + returnAmount;
+            if (balanceChange > 0) {
+              setUsers((prev) =>
+                prev.map((user) =>
+                  user.id === existingTrade.userId
+                    ? { ...user, balance: (user.balance || 0) + balanceChange }
+                    : user
+                )
+              );
+              setStatistics((prev) => ({
+                ...prev,
+                totalCurrentBalanceUSD:
+                  (prev.totalCurrentBalanceUSD || 0) + balanceChange,
+              }));
+            }
+          }
+        }
       } else {
         const error = await res.json();
         alert(`Failed to resolve trade: ${error.error || "Unknown error"}`);
@@ -432,7 +605,7 @@ export default function AdminPage() {
       console.error("Error resolving trade:", error);
       alert("Error resolving trade");
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -442,7 +615,7 @@ export default function AdminPage() {
   };
 
   // Show loading state while checking authentication
-  if (loading) {
+  if (isAuthLoading) {
     return (
       <main className={styles.container}>
         <div className={styles.loginContainer}>
@@ -489,9 +662,9 @@ export default function AdminPage() {
           <button
             onClick={handleRefreshData}
             className={styles.refreshButton}
-            disabled={loading}
+            disabled={isBusy}
           >
-            {loading ? "Refreshing..." : "🔄 Refresh"}
+            {isRefreshing ? "Refreshing..." : "🔄 Refresh"}
           </button>
           <button onClick={handleExportData} className={styles.exportButton}>
             📊 Export Data
@@ -520,6 +693,16 @@ export default function AdminPage() {
             })}
           </div>
           <div className={styles.statLabel}>Total Deposits (USD)</div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statValue}>
+            $
+            {(statistics?.totalDepositedAllUSD ?? 0).toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </div>
+          <div className={styles.statLabel}>Total Deposited (USD)</div>
         </div>
         <div className={styles.statCard}>
           <div className={styles.statValue}>
@@ -635,17 +818,22 @@ export default function AdminPage() {
                   <tbody>
                     {users.map((user) => (
                       <tr
-                        key={user._id || user.userId}
+                        key={user.id || user._id || user.userId}
                         className={styles.tableRow}
                       >
-                        <td className={styles.userId}>{user.id}</td>
-                        <td className={styles.walletAddress}>
+                        <td className={styles.userId} data-label="User ID">
+                          {user.id}
+                        </td>
+                        <td
+                          className={styles.walletAddress}
+                          data-label="Wallet Address"
+                        >
                           {user.ethereumAddress || user.email || "N/A"}
                         </td>
-                        <td className={styles.joinDate}>
+                        <td className={styles.joinDate} data-label="Join Date">
                           {formatDate(user.createdAt)}
                         </td>
-                        <td className={styles.deposits}>
+                        <td className={styles.deposits} data-label="Total Deposits">
                           $
                           {(user.totalDepositsUSD ?? 0).toLocaleString(
                             "en-US",
@@ -655,7 +843,10 @@ export default function AdminPage() {
                             }
                           )}
                         </td>
-                        <td className={styles.withdrawals}>
+                        <td
+                          className={styles.withdrawals}
+                          data-label="Total Withdrawals"
+                        >
                           $
                           {(user.totalWithdrawalsUSD ?? 0).toLocaleString(
                             "en-US",
@@ -665,7 +856,10 @@ export default function AdminPage() {
                             }
                           )}
                         </td>
-                        <td className={styles.currentBalance}>
+                        <td
+                          className={styles.currentBalance}
+                          data-label="Current Balance"
+                        >
                           $
                           {(user.balance ?? 0).toLocaleString(
                             "en-US",
@@ -675,17 +869,17 @@ export default function AdminPage() {
                             }
                           )}
                         </td>
-                        <td className={styles.lastActivity}>
+                        <td className={styles.lastActivity} data-label="Last Activity">
                           {formatDate(user.createdAt)}
                         </td>
-                        <td className={styles.status}>
+                        <td className={styles.status} data-label="Status">
                           <span
                             className={`${styles.statusBadge} ${styles.active}`}
                           >
                             Active
                           </span>
                         </td>
-                        <td className={styles.actions}>
+                        <td className={styles.actions} data-label="Actions">
                           <button
                             className={styles.editButton}
                             onClick={() => openBalanceModal(user)}
@@ -747,6 +941,7 @@ export default function AdminPage() {
                       <th>Return %</th>
                       <th>Entry Price</th>
                       <th>Duration</th>
+                      <th>Time Left</th>
                       <th>Created</th>
                       <th>Status</th>
                       <th>P&L</th>
@@ -754,64 +949,116 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {getFilteredTrades().map((trade) => (
-                      <tr key={trade.id} className={styles.tableRow}>
-                        <td className={styles.userId}>
-                          {trade.user?.email || trade.user?.name || trade.userId?.slice(0, 8)}
-                        </td>
-                        <td className={styles.symbol}>{trade.symbol}</td>
-                        <td>
-                          <span
-                            className={`${styles.directionBadge} ${
-                              trade.direction === "UP" ? styles.up : styles.down
-                            }`}
-                          >
-                            {trade.direction === "UP" ? "↑ UP" : "↓ DOWN"}
-                          </span>
-                        </td>
-                        <td className={styles.amount}>${trade.amount?.toFixed(2)}</td>
-                        <td className={styles.returnPct}>{trade.returnPct}%</td>
-                        <td className={styles.price}>${trade.priceOpen?.toFixed(2)}</td>
-                        <td className={styles.duration}>{trade.duration}s</td>
-                        <td className={styles.date}>{formatDate(trade.createdAt)}</td>
-                        <td>
-                          <span
-                            className={`${styles.statusBadge} ${styles[trade.status?.toLowerCase()]}`}
-                          >
-                            {trade.status}
-                          </span>
-                        </td>
-                        <td className={trade.pnl >= 0 ? styles.profit : styles.loss}>
-                          {trade.pnl !== null && trade.pnl !== undefined
-                            ? `${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}`
-                            : "-"}
-                        </td>
-                        <td className={styles.actions}>
-                          {trade.status === "PENDING" ? (
-                            <>
-                              <button
-                                className={styles.approveButton}
-                                onClick={() => handleResolveTrade(trade.id, "WON")}
-                                disabled={loading}
-                              >
-                                Mark WON
-                              </button>
-                              <button
-                                className={styles.rejectButton}
-                                onClick={() => handleResolveTrade(trade.id, "LOST")}
-                                disabled={loading}
-                              >
-                                Mark LOST
-                              </button>
-                            </>
-                          ) : (
-                            <span className={styles.processedDate}>
-                              {trade.resolvedAt ? formatDate(trade.resolvedAt) : "N/A"}
+                    {getFilteredTrades().map((trade) => {
+                      const remainingSeconds =
+                        trade.status === "PENDING"
+                          ? getTradeRemainingSeconds(trade)
+                          : 0;
+                      const isExpired = remainingSeconds <= 0;
+                      const isScheduled =
+                        trade.status === "PENDING" && trade.adminResult && !isExpired;
+
+                      return (
+                        <tr key={trade.id} className={styles.tableRow}>
+                          <td className={styles.userId} data-label="User">
+                            {trade.user?.email ||
+                              trade.user?.name ||
+                              trade.userId?.slice(0, 8)}
+                          </td>
+                          <td className={styles.symbol} data-label="Symbol">
+                            {trade.symbol}
+                          </td>
+                          <td data-label="Direction">
+                            <span
+                              className={`${styles.directionBadge} ${
+                                trade.direction === "UP" ? styles.up : styles.down
+                              }`}
+                            >
+                              {trade.direction === "UP" ? "↑ UP" : "↓ DOWN"}
                             </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className={styles.amount} data-label="Amount">
+                            ${trade.amount?.toFixed(2)}
+                          </td>
+                          <td className={styles.returnPct} data-label="Return %">
+                            {trade.returnPct}%
+                          </td>
+                          <td className={styles.price} data-label="Entry Price">
+                            ${trade.priceOpen?.toFixed(2)}
+                          </td>
+                          <td className={styles.duration} data-label="Duration">
+                            {trade.duration}s
+                          </td>
+                          <td className={styles.countdownCell} data-label="Time Left">
+                            {trade.status === "PENDING" ? (
+                              <span
+                                className={
+                                  isExpired
+                                    ? styles.expiredBadge
+                                    : styles.countdownBadge
+                                }
+                              >
+                                {isExpired
+                                  ? "Expired"
+                                  : formatCountdown(remainingSeconds)}
+                              </span>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                          <td className={styles.date} data-label="Created">
+                            {formatDate(trade.createdAt)}
+                          </td>
+                          <td data-label="Status">
+                            <span
+                              className={`${styles.statusBadge} ${
+                                styles[trade.status?.toLowerCase()]
+                              }`}
+                            >
+                              {trade.status}
+                            </span>
+                          </td>
+                          <td
+                            className={trade.pnl >= 0 ? styles.profit : styles.loss}
+                            data-label="P&L"
+                          >
+                            {trade.pnl !== null && trade.pnl !== undefined
+                              ? `${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}`
+                              : "-"}
+                          </td>
+                          <td className={styles.actions} data-label="Actions">
+                            {trade.status === "PENDING" ? (
+                              isScheduled ? (
+                                <span className={styles.scheduledBadge}>
+                                  Scheduled {trade.adminResult}
+                                </span>
+                              ) : (
+                                <>
+                                  <button
+                                    className={styles.approveButton}
+                                    onClick={() => handleResolveTrade(trade.id, "WON")}
+                                    disabled={isBusy}
+                                  >
+                                    Mark WON
+                                  </button>
+                                  <button
+                                    className={styles.rejectButton}
+                                    onClick={() => handleResolveTrade(trade.id, "LOST")}
+                                    disabled={isBusy}
+                                  >
+                                    Mark LOST
+                                  </button>
+                                </>
+                              )
+                            ) : (
+                              <span className={styles.processedDate}>
+                                {trade.resolvedAt ? formatDate(trade.resolvedAt) : "N/A"}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -866,31 +1113,35 @@ export default function AdminPage() {
                   <tbody>
                     {deposits.map((deposit) => (
                       <tr
-                        key={deposit._id || deposit.transactionHash}
+                        key={deposit.id || deposit._id || deposit.transactionHash}
                         className={styles.tableRow}
                       >
-                        <td className={styles.userId}>{deposit.userId}</td>
-                        <td className={styles.token}>{deposit.token}</td>
-                        <td className={styles.amount}>
+                        <td className={styles.userId} data-label="User ID">
+                          {deposit.userId}
+                        </td>
+                        <td className={styles.token} data-label="Token">
+                          {deposit.token}
+                        </td>
+                        <td className={styles.amount} data-label="Amount">
                           {formatAmount(deposit.amount, deposit.token)}
                         </td>
-                        <td className={styles.usdValue}>
+                        <td className={styles.usdValue} data-label="USD Value">
                           $
                           {(deposit.usdAmount ?? 0).toLocaleString("en-US", {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
                           })}
                         </td>
-                        <td className={styles.txHash}>
+                        <td className={styles.txHash} data-label="Transaction Hash">
                           {deposit.transactionHash}
                         </td>
-                        <td className={styles.walletAddress}>
+                        <td className={styles.walletAddress} data-label="Wallet Address">
                           {deposit.walletAddress}
                         </td>
-                        <td className={styles.date}>
+                        <td className={styles.date} data-label="Submission Date">
                           {formatDate(deposit.submissionDate)}
                         </td>
-                        <td>
+                        <td data-label="Status">
                           <span
                             className={`${styles.status} ${
                               styles[deposit.status]
@@ -900,7 +1151,7 @@ export default function AdminPage() {
                               deposit.status.slice(1)}
                           </span>
                         </td>
-                        <td className={styles.actions}>
+                        <td className={styles.actions} data-label="Actions">
                           {deposit.status === "pending" ? (
                             <>
                               <button
@@ -908,14 +1159,14 @@ export default function AdminPage() {
                                 onClick={() =>
                                   handleApproveDeposit(deposit._id)
                                 }
-                                disabled={loading}
+                                disabled={isBusy}
                               >
                                 Approve
                               </button>
                               <button
                                 className={styles.rejectButton}
                                 onClick={() => handleRejectDeposit(deposit._id)}
-                                disabled={loading}
+                                disabled={isBusy}
                               >
                                 Reject
                               </button>
@@ -987,28 +1238,32 @@ export default function AdminPage() {
                         key={withdrawal.id || withdrawal.toAddress}
                         className={styles.tableRow}
                       >
-                        <td className={styles.userId}>{withdrawal.userId}</td>
-                        <td className={styles.token}>USD</td>
-                        <td className={styles.amount}>
+                        <td className={styles.userId} data-label="User ID">
+                          {withdrawal.userId}
+                        </td>
+                        <td className={styles.token} data-label="Token">
+                          USD
+                        </td>
+                        <td className={styles.amount} data-label="Amount">
                           ${withdrawal.amount?.toFixed(2) || '0.00'}
                         </td>
-                        <td className={styles.usdValue}>
+                        <td className={styles.usdValue} data-label="USD Value">
                           $
                           {(withdrawal.amount ?? 0).toLocaleString("en-US", {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
                           })}
                         </td>
-                        <td className={styles.walletAddress}>
+                        <td className={styles.walletAddress} data-label="Destination Address">
                           {withdrawal.toAddress}
                         </td>
-                        <td className={styles.transferMethod}>
+                        <td className={styles.transferMethod} data-label="Transfer Method">
                           Simulator
                         </td>
-                        <td className={styles.date}>
+                        <td className={styles.date} data-label="Request Date">
                           {formatDate(withdrawal.createdAt)}
                         </td>
-                        <td>
+                        <td data-label="Status">
                           <span
                             className={`${styles.status} ${
                               styles[withdrawal.status]
@@ -1018,7 +1273,7 @@ export default function AdminPage() {
                               withdrawal.status.slice(1)}
                           </span>
                         </td>
-                        <td className={styles.actions}>
+                        <td className={styles.actions} data-label="Actions">
                           {withdrawal.status === "PENDING" ? (
                             <>
                               <button
@@ -1026,7 +1281,7 @@ export default function AdminPage() {
                                 onClick={() =>
                                   handleApproveWithdrawal(withdrawal.id)
                                 }
-                                disabled={loading}
+                                disabled={isBusy}
                               >
                                 Approve
                               </button>
@@ -1035,7 +1290,7 @@ export default function AdminPage() {
                                 onClick={() =>
                                   handleRejectWithdrawal(withdrawal.id)
                                 }
-                                disabled={loading}
+                                disabled={isBusy}
                               >
                                 Reject
                               </button>
@@ -1129,9 +1384,9 @@ export default function AdminPage() {
                     <button
                       onClick={handleUpdateDepositAddresses}
                       className={styles.saveButton}
-                      disabled={loading}
+                      disabled={isBusy}
                     >
-                      {loading ? "Saving..." : "💾 Save Changes"}
+                      {isBusy ? "Saving..." : "💾 Save Changes"}
                     </button>
                   </div>
                 ) : (

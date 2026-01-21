@@ -113,6 +113,7 @@ model Trade {
   priceClose Float?
   priceCloseAt DateTime?
   pnl        Float?
+  adminResult String?
   status     String    @default("PENDING")
   createdAt  DateTime  @default(now())
   resolvedAt DateTime?

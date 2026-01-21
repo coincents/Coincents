@@ -316,14 +316,18 @@
   background: rgba(26, 26, 46, 0.95);
   border: 1px solid #333333;
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
 }
 
 .usersTable,
 .depositsTable,
-.withdrawalsTable {
+.withdrawalsTable,
+.tradesTable {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
 }
 
@@ -348,6 +352,14 @@
 
 .tableRow:hover {
   background: rgba(102, 126, 234, 0.05);
+}
+
+.tableRow {
+  box-shadow: inset 0 -1px 0 #333333;
+}
+
+.tableRow td {
+  border-bottom: none;
 }
 
 .userId {
@@ -410,6 +422,38 @@
 .statusBadge {
   padding: 0.25rem 0.75rem;
   border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.countdownCell {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.85rem;
+}
+
+.countdownBadge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(102, 126, 234, 0.2);
+  color: #a5b4fc;
+  border: 1px solid rgba(102, 126, 234, 0.4);
+}
+
+.expiredBadge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.scheduledBadge {
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
   font-size: 0.8rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -541,16 +585,67 @@
   }
 
   .tableContainer {
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .usersTable,
   .depositsTable,
-  .withdrawalsTable {
-    min-width: 800px;
+  .withdrawalsTable,
+  .tradesTable {
+    min-width: 0;
+    border-collapse: separate;
+  }
+
+  .usersTable thead,
+  .depositsTable thead,
+  .withdrawalsTable thead,
+  .tradesTable thead {
+    display: none;
+  }
+
+  .usersTable tr,
+  .depositsTable tr,
+  .withdrawalsTable tr,
+  .tradesTable tr {
+    display: block;
+    border: 1px solid #333333;
+    border-radius: 12px;
+    margin: 0.75rem 0;
+    background: rgba(15, 15, 35, 0.6);
+    box-shadow: none;
+  }
+
+  .usersTable td,
+  .depositsTable td,
+  .withdrawalsTable td,
+  .tradesTable td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid rgba(51, 51, 51, 0.7);
+  }
+
+  .usersTable td:last-child,
+  .depositsTable td:last-child,
+  .withdrawalsTable td:last-child,
+  .tradesTable td:last-child {
+    border-bottom: none;
+  }
+
+  .usersTable td[data-label]::before,
+  .depositsTable td[data-label]::before,
+  .withdrawalsTable td[data-label]::before,
+  .tradesTable td[data-label]::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #9ca3af;
+    flex: 0 0 auto;
   }
 
   .actions {
+    justify-content: flex-start;
     flex-direction: column;
     gap: 0.25rem;
   }
@@ -746,7 +841,7 @@
 .tradesTable td {
   padding: 1rem;
   text-align: left;
-  border-bottom: 1px solid #333333;
+  border-bottom: none;
 }
 
 .tradesTable th {

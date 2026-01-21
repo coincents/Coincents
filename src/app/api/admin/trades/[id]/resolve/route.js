@@ -15,7 +15,7 @@ export async function POST(request, { params }) {
     }
 
     const { id } = await params;
-    const { result, priceClose } = await request.json();
+    const { result } = await request.json();
 
     // Validate result
     if (!result || !["WON", "LOST"].includes(result)) {
@@ -45,6 +45,24 @@ export async function POST(request, { params }) {
       );
     }
 
+    const openAt = trade.priceOpenAt || trade.createdAt;
+    const expiresAt = new Date(openAt.getTime() + trade.timeframe * 1000);
+    const isExpired = Date.now() >= expiresAt.getTime();
+
+    if (!isExpired) {
+      const scheduled = await prisma.trade.update({
+        where: { id: trade.id },
+        data: { adminResult: result },
+      });
+      return NextResponse.json({
+        success: true,
+        trade: scheduled,
+        scheduled: true,
+        expiresAt,
+        message: `Trade scheduled to resolve as ${result} at expiry.`,
+      });
+    }
+
     // Calculate P&L
     // If WON: user gets back their amount + profit (amount * returnPct / 100)
     // If LOST: user loses their amount (already deducted when trade was created)
@@ -63,9 +81,10 @@ export async function POST(request, { params }) {
         where: { id },
         data: {
           status: result,
-          priceClose: priceClose || trade.priceOpen,
+          priceClose: trade.priceOpen,
           pnl,
           resolvedAt: new Date(),
+          adminResult: result,
         },
       }),
       prisma.user.update({

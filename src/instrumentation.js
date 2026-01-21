@@ -11,7 +11,6 @@ export async function register() {
       return;
     }
 
-    // Server-side: provide a proper localStorage polyfill
     const localStorageMock = {
       _data: {},
       getItem(key) {
@@ -35,7 +34,6 @@ export async function register() {
       },
     };
 
-    // Override the broken localStorage
     globalThis.localStorage = localStorageMock;
     globalThis.sessionStorage = localStorageMock;
   }
